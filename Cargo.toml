@@ -14,6 +14,10 @@ keywords = ["html5", "parser"]
 name = "tokenizer"
 path = "tests/tokenizer.rs"
 
+[[test]]
+name = "htmlparser"
+path = "tests/htmlparser.rs"
+
 [[bench]]
 name = "tokenizer"
 harness = false
