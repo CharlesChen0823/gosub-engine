@@ -53,13 +53,7 @@ impl<'a> Tokenizer<'a> {
 
                     let c = read_char!(self);
                     match c {
-                        // Element::Eof => {
-                        //     consume_temp_buffer!(self, as_attribute);
-                        //     return
-                        // },
-                        Element::Utf8('A'..='Z')
-                        | Element::Utf8('a'..='z')
-                        | Element::Utf8('0'..='9') => {
+                        Element::Utf8(ch) if ch.is_ascii_alphanumeric() => {
                             self.stream.unread();
                             ccr_state = CcrState::NamedCharacterReference;
                         }
@@ -122,9 +116,7 @@ impl<'a> Tokenizer<'a> {
                     let c = read_char!(self);
                     match c {
                         // Element::Eof => return,
-                        Element::Utf8('A'..='Z')
-                        | Element::Utf8('a'..='z')
-                        | Element::Utf8('0'..='9') => {
+                        Element::Utf8(ch) if ch.is_ascii_alphanumeric() => {
                             if as_attribute {
                                 self.current_attr_value.push(c.utf8());
                             } else {

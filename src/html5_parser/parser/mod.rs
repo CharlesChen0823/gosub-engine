@@ -103,6 +103,7 @@ macro_rules! pop_until {
             }
 
             if current_node!($self).name == $name {
+                $self.open_elements.pop();
                 break;
             }
 
@@ -427,7 +428,7 @@ impl<'a> Html5Parser<'a> {
                             // ignore token
                         }
                         Token::StartTagToken { name, .. } if name == "html" => {
-                            self.insert_html_element(&self.current_token.clone());
+                            self.insert_html_document(&self.current_token.clone());
 
                             self.insertion_mode = InsertionMode::BeforeHead;
                         }
@@ -453,7 +454,7 @@ impl<'a> Html5Parser<'a> {
                             is_self_closing: false,
                             attributes: HashMap::new(),
                         };
-                        self.insert_html_element(&token);
+                        self.insert_html_document(&token);
 
                         self.insertion_mode = InsertionMode::BeforeHead;
                         self.reprocess_token = true;
@@ -816,7 +817,6 @@ impl<'a> Html5Parser<'a> {
 
                         if current_node!(self).name != "caption" {
                             self.parse_error("caption end tag not at top of stack");
-                            continue;
                         }
 
                         pop_until!(self, "caption");
@@ -858,6 +858,9 @@ impl<'a> Html5Parser<'a> {
                         }
                         Token::EndTagToken { name, .. } if name == "template" => {
                             self.handle_in_head();
+                        }
+                        Token::EofToken => {
+                            self.insertion_mode = InsertionMode::InBody;
                         }
                         Token::EndTagToken { name, .. } if name == "colgroup" => {
                             if current_node!(self).name != "colgroup" {
@@ -956,7 +959,7 @@ impl<'a> Html5Parser<'a> {
                             self.insertion_mode = InsertionMode::InRow;
                             self.reprocess_token = true;
                         }
-                        Token::StartTagToken { name, .. }
+                        Token::EndTagToken { name, .. }
                             if name == "tbody" || name == "tfoot" || name == "thead" =>
                         {
                             if !self.is_in_scope(name, Scope::Table) {
@@ -1111,7 +1114,7 @@ impl<'a> Html5Parser<'a> {
                 // Checked: 1
                 InsertionMode::InCell => {
                     match &self.current_token {
-                        Token::StartTagToken { name, .. } if name == "th" || name == "td" => {
+                        Token::EndTagToken { name, .. } if name == "th" || name == "td" => {
                             let token_name = name.clone();
 
                             if !self.is_in_scope(name.as_str(), Scope::Table) {
@@ -1182,152 +1185,7 @@ impl<'a> Html5Parser<'a> {
                     }
                 }
                 // Checked: 1
-                InsertionMode::InSelect => {
-                    match &self.current_token {
-                        Token::TextToken { .. } if self.current_token.is_null() => {
-                            self.parse_error(
-                                "null character not allowed in in select insertion mode",
-                            );
-                            // ignore token
-                        }
-                        Token::TextToken { .. } => {
-                            let node = self.create_node(&self.current_token, HTML_NAMESPACE);
-                            self.document.add_node(node, current_node!(self).id);
-                        }
-                        Token::CommentToken { .. } => {
-                            let node = self.create_node(&self.current_token, HTML_NAMESPACE);
-                            self.document.add_node(node, current_node!(self).id);
-                        }
-                        Token::DocTypeToken { .. } => {
-                            self.parse_error("doctype not allowed in in select insertion mode");
-                            // ignore token
-                        }
-                        Token::StartTagToken { name, .. } if name == "html" => {
-                            self.handle_in_body();
-                        }
-                        Token::StartTagToken { name, .. } if name == "option" => {
-                            if current_node!(self).name == "option" {
-                                self.open_elements.pop();
-                            }
-
-                            self.insert_html_element(&self.current_token.clone());
-                        }
-                        Token::StartTagToken { name, .. } if name == "optgroup" => {
-                            if current_node!(self).name == "option" {
-                                self.open_elements.pop();
-                            }
-
-                            if current_node!(self).name == "optgroup" {
-                                self.open_elements.pop();
-                            }
-
-                            self.insert_html_element(&self.current_token.clone());
-                        }
-                        Token::StartTagToken {
-                            name,
-                            is_self_closing,
-                            ..
-                        } if name == "hr" => {
-                            if current_node!(self).name == "option" {
-                                self.open_elements.pop();
-                            }
-
-                            if current_node!(self).name == "optgroup" {
-                                self.open_elements.pop();
-                            }
-
-                            acknowledge_closing_tag!(self, *is_self_closing);
-
-                            self.insert_html_element(&self.current_token.clone());
-                            self.open_elements.pop();
-                        }
-                        Token::EndTagToken { name, .. } if name == "optgroup" => {
-                            if current_node!(self).name == "option"
-                                && self.open_elements.len() > 1
-                                && open_elements_get!(self, self.open_elements.len() - 1).name
-                                    == "optgroup"
-                            {
-                                self.open_elements.pop();
-                            }
-
-                            if current_node!(self).name == "optgroup" {
-                                self.open_elements.pop();
-                            } else {
-                                self.parse_error(
-                                    "optgroup end tag not allowed in in select insertion mode",
-                                );
-                                // ignore token
-                                continue;
-                            }
-                        }
-                        Token::EndTagToken { name, .. } if name == "option" => {
-                            if current_node!(self).name == "option" {
-                                self.open_elements.pop();
-                            } else {
-                                self.parse_error(
-                                    "option end tag not allowed in in select insertion mode",
-                                );
-                                // ignore token
-                                continue;
-                            }
-                        }
-                        Token::EndTagToken { name, .. } if name == "select" => {
-                            if !self.is_in_scope("select", Scope::Select) {
-                                self.parse_error(
-                                    "select end tag not allowed in in select insertion mode",
-                                );
-                                // ignore token
-                                continue;
-                            }
-
-                            pop_until!(self, "select");
-                            self.reset_insertion_mode();
-                        }
-                        Token::StartTagToken { name, .. } if name == "select" => {
-                            self.parse_error("select tag not allowed in in select insertion mode");
-
-                            if !self.is_in_scope("select", Scope::Select) {
-                                // ignore token (fragment case?)
-                                continue;
-                            }
-
-                            pop_until!(self, "select");
-                            self.reset_insertion_mode();
-                        }
-                        Token::StartTagToken { name, .. }
-                            if name == "input" || name == "keygen" || name == "textarea" =>
-                        {
-                            self.parse_error("input, keygen or textarea tag not allowed in in select insertion mode");
-
-                            if !self.is_in_scope("select", Scope::Select) {
-                                // ignore token (fragment case)
-                                continue;
-                            }
-
-                            pop_until!(self, "select");
-                            self.reset_insertion_mode();
-                            self.reprocess_token = true;
-                        }
-
-                        Token::StartTagToken { name, .. }
-                            if name == "script" || name == "template" =>
-                        {
-                            self.handle_in_head();
-                        }
-                        Token::EndTagToken { name, .. } if name == "template" => {
-                            self.handle_in_head();
-                        }
-                        Token::EofToken => {
-                            self.handle_in_body();
-                        }
-                        _ => {
-                            self.parse_error(
-                                "anything else not allowed in in select insertion mode",
-                            );
-                            // ignore token
-                        }
-                    }
-                }
+                InsertionMode::InSelect => self.handle_in_select(),
                 // Checked: 1
                 InsertionMode::InSelectInTable => {
                     match &self.current_token {
@@ -1679,7 +1537,6 @@ impl<'a> Html5Parser<'a> {
 
     // Create a new node that is not connected or attached to the document arena
     fn create_node(&self, token: &Token, namespace: &str) -> Node {
-        let val: String;
         match token {
             Token::DocTypeToken {
                 name,
@@ -1687,13 +1544,29 @@ impl<'a> Html5Parser<'a> {
                 sys_identifier,
                 force_quirks,
             } => {
-                val = format!(
-                    "doctype[{} {} {} {}]",
-                    name.as_deref().unwrap_or(""),
-                    pub_identifier.as_deref().unwrap_or(""),
-                    sys_identifier.as_deref().unwrap_or(""),
-                    force_quirks
-                );
+                let mut val = String::from("!DOCTYPE ");
+                val.push_str(format!("{}", name.as_ref().unwrap_or(&"".to_string())).as_str());
+                if pub_identifier.is_some() || sys_identifier.is_some() {
+                    if !*force_quirks {
+                        val.push_str(
+                            format!(
+                                " \"{}\" \"{}\"",
+                                pub_identifier.as_deref().unwrap_or("").to_string(),
+                                sys_identifier.as_deref().unwrap_or("").to_string()
+                            )
+                            .as_str(),
+                        );
+                    } else {
+                        val.push_str(
+                            format!(
+                                " {} {}",
+                                pub_identifier.as_deref().unwrap_or("").to_string(),
+                                sys_identifier.as_deref().unwrap_or("").to_string()
+                            )
+                            .as_str(),
+                        );
+                    }
+                }
 
                 return Node::new_element(val.as_str(), HashMap::new(), namespace);
             }
@@ -1965,6 +1838,7 @@ impl<'a> Html5Parser<'a> {
                 // ignore token
             }
             Token::TextToken { .. } if self.current_token.is_empty_or_white() => {
+                // TODO fixed
                 self.reconstruct_formatting();
 
                 let node = self.create_node(&self.current_token, HTML_NAMESPACE);
@@ -2166,15 +2040,14 @@ impl<'a> Html5Parser<'a> {
                 self.frameset_ok = false;
             }
             Token::StartTagToken { name, .. } if name == "form" => {
-                {
-                    if self.form_element.is_some() && !open_elements_has!(self, "template") {
-                        self.parse_error("error with template, form shzzl");
-                        // ignore token
-                    }
+                if self.form_element.is_some() && !open_elements_has!(self, "template") {
+                    self.parse_error("error with template, form shzzl");
+                    // ignore token
+                    return;
+                }
 
-                    if self.is_in_scope("p", Scope::Button) {
-                        self.close_p_element();
-                    }
+                if self.is_in_scope("p", Scope::Button) {
+                    self.close_p_element();
                 }
 
                 let node_id = self.insert_html_element(&self.current_token.clone());
@@ -2182,8 +2055,49 @@ impl<'a> Html5Parser<'a> {
                     self.form_element = Some(node_id);
                 }
             }
-            Token::StartTagToken { name, .. } if name == "li" => {}
-            Token::StartTagToken { name, .. } if name == "dd" || name == "dt" => {}
+            Token::StartTagToken { name, .. } if name == "li" || name == "dd" || name == "dt" => {
+                self.frameset_ok = false;
+
+                for idx in (0..self.open_elements.len()).rev() {
+                    let node_id = self.open_elements[idx];
+                    let node = self
+                        .document
+                        .get_node_by_id(node_id)
+                        .expect("node not found")
+                        .clone();
+
+                    if node.name == name.as_str() {
+                        self.generate_all_implied_end_tags(Some(name.as_str()), false);
+
+                        // It might be possible that the last item is not our node_id. Emit parse error if so
+                        if current_node!(self).id != node.id {
+                            self.parse_error("end tag not at top of stack");
+                        }
+
+                        // Pop until we reach the node.id
+                        while current_node!(self).id != node.id {
+                            self.open_elements.pop();
+                        }
+                        // Pop node_id as well
+                        self.open_elements.pop();
+
+                        break;
+                    }
+
+                    if node.is_special() && ["address", "div", "p"].contains(&node.name.as_str()) {
+                        break;
+                    }
+                }
+
+                if self.is_in_scope("p", Scope::Button) {
+                    self.close_p_element();
+                }
+
+                self.insert_html_element(&self.current_token.clone());
+            }
+            // Token::StartTagToken { name, .. } if name == "dd" || name == "dt" => {
+            //
+            // }
             Token::StartTagToken { name, .. } if name == "plaintext" => {
                 if self.is_in_scope("p", Scope::Button) {
                     self.close_p_element();
@@ -2269,6 +2183,7 @@ impl<'a> Html5Parser<'a> {
                     if node_id != cn.id {
                         self.parse_error("end tag not at top of stack");
                     }
+                    self.open_elements.pop();
                 } else {
                     if !self.is_in_scope(name, Scope::Regular) {
                         self.parse_error("end tag not in scope");
@@ -2589,13 +2504,12 @@ impl<'a> Html5Parser<'a> {
                 self.reprocess_token = true;
             }
             Token::StartTagToken { name, .. } if name == "textarea" => {
-                let node = self.create_node(&self.current_token, HTML_NAMESPACE);
-                self.document.add_node(node, current_node!(self).id);
-                self.open_elements.pop();
+                self.insert_html_element(&self.current_token.clone());
 
                 // @TODO: if next token == LF, ignore and move on to the next one
 
                 self.tokenizer.state = State::RcDataState;
+                self.original_insertion_mode = self.insertion_mode;
                 self.frameset_ok = false;
                 self.insertion_mode = InsertionMode::Text;
             }
@@ -2622,9 +2536,7 @@ impl<'a> Html5Parser<'a> {
             Token::StartTagToken { name, .. } if name == "select" => {
                 self.reconstruct_formatting();
 
-                let node = self.create_node(&self.current_token, HTML_NAMESPACE);
-                self.document.add_node(node, current_node!(self).id);
-                self.open_elements.pop();
+                self.insert_html_element(&self.current_token.clone());
 
                 self.frameset_ok = false;
 
@@ -2737,16 +2649,10 @@ impl<'a> Html5Parser<'a> {
                 self.reconstruct_formatting();
                 self.insert_html_element(&self.current_token.clone());
             }
-            _ => any_other_end_tag = true,
+            Token::EndTagToken { .. } => any_other_end_tag = true,
         }
 
         if any_other_end_tag {
-            if self.open_elements.is_empty() {
-                self.parse_error("no open elements");
-                // ignore token
-                return;
-            }
-
             let token_name = match self.current_token {
                 Token::EndTagToken { ref name, .. } => name.clone(),
                 _ => unreachable!(),
@@ -2803,6 +2709,9 @@ impl<'a> Html5Parser<'a> {
             Token::DocTypeToken { .. } => {
                 self.parse_error("doctype not allowed in before head insertion mode");
                 // ignore token
+            }
+            Token::StartTagToken { name, .. } if name == "html" => {
+                self.handle_in_body();
             }
             Token::StartTagToken {
                 name,
@@ -3066,7 +2975,139 @@ impl<'a> Html5Parser<'a> {
 
     // Handle insertion mode "in_select"
     fn handle_in_select(&mut self) {
-        todo!()
+        match &self.current_token {
+            Token::TextToken { .. } if self.current_token.is_null() => {
+                self.parse_error("null character not allowed in in select insertion mode");
+                // ignore token
+            }
+            Token::TextToken { .. } => {
+                let node = self.create_node(&self.current_token, HTML_NAMESPACE);
+                self.document.add_node(node, current_node!(self).id);
+            }
+            Token::CommentToken { .. } => {
+                let node = self.create_node(&self.current_token, HTML_NAMESPACE);
+                self.document.add_node(node, current_node!(self).id);
+            }
+            Token::DocTypeToken { .. } => {
+                self.parse_error("doctype not allowed in in select insertion mode");
+                // ignore token
+            }
+            Token::StartTagToken { name, .. } if name == "html" => {
+                self.handle_in_body();
+            }
+            Token::StartTagToken { name, .. } if name == "option" => {
+                if current_node!(self).name == "option" {
+                    self.open_elements.pop();
+                }
+
+                self.insert_html_element(&self.current_token.clone());
+            }
+            Token::StartTagToken { name, .. } if name == "optgroup" => {
+                if current_node!(self).name == "option" {
+                    self.open_elements.pop();
+                }
+
+                if current_node!(self).name == "optgroup" {
+                    self.open_elements.pop();
+                }
+
+                self.insert_html_element(&self.current_token.clone());
+            }
+            Token::StartTagToken {
+                name,
+                is_self_closing,
+                ..
+            } if name == "hr" => {
+                if current_node!(self).name == "option" {
+                    self.open_elements.pop();
+                }
+
+                if current_node!(self).name == "optgroup" {
+                    self.open_elements.pop();
+                }
+
+                acknowledge_closing_tag!(self, *is_self_closing);
+
+                self.insert_html_element(&self.current_token.clone());
+                self.open_elements.pop();
+            }
+            Token::EndTagToken { name, .. } if name == "optgroup" => {
+                if current_node!(self).name == "option"
+                    && self.open_elements.len() > 1
+                    && open_elements_get!(self, self.open_elements.len() - 1).name == "optgroup"
+                {
+                    self.open_elements.pop();
+                }
+
+                if current_node!(self).name == "optgroup" {
+                    self.open_elements.pop();
+                } else {
+                    self.parse_error("optgroup end tag not allowed in in select insertion mode");
+                    // ignore token
+                    return;
+                }
+            }
+            Token::EndTagToken { name, .. } if name == "option" => {
+                if current_node!(self).name == "option" {
+                    self.open_elements.pop();
+                } else {
+                    self.parse_error("option end tag not allowed in in select insertion mode");
+                    // ignore token
+                    return;
+                }
+            }
+            Token::EndTagToken { name, .. } if name == "select" => {
+                if !self.is_in_scope("select", Scope::Select) {
+                    self.parse_error("select end tag not allowed in in select insertion mode");
+                    // ignore token
+                    return;
+                }
+
+                pop_until!(self, "select");
+                self.reset_insertion_mode();
+            }
+            Token::StartTagToken { name, .. } if name == "select" => {
+                self.parse_error("select tag not allowed in in select insertion mode");
+
+                if !self.is_in_scope("select", Scope::Select) {
+                    // ignore token (fragment case?)
+                    return;
+                }
+
+                pop_until!(self, "select");
+                self.reset_insertion_mode();
+            }
+            Token::StartTagToken { name, .. }
+                if name == "input" || name == "keygen" || name == "textarea" =>
+            {
+                self.parse_error(
+                    "input, keygen or textarea tag not allowed in in select insertion mode",
+                );
+
+                if !self.is_in_scope("select", Scope::Select) {
+                    // ignore token (fragment case)
+                    return;
+                }
+
+                pop_until!(self, "select");
+                self.reset_insertion_mode();
+                self.reprocess_token = true;
+            }
+
+            Token::StartTagToken { name, .. } if name == "script" || name == "template" => {
+                self.handle_in_head();
+            }
+            Token::EndTagToken { name, .. } if name == "template" => {
+                self.handle_in_head();
+            }
+            Token::EofToken => {
+                self.handle_in_body();
+            }
+            _ => {
+                self.parse_error("anything else not allowed in in select insertion mode");
+                // ignore token
+            }
+        }
     }
 
     // Returns true if the given tag if found in the active formatting elements list (until the first marker)
@@ -3268,7 +3309,6 @@ impl<'a> Html5Parser<'a> {
         }
 
         pop_until!(self, "p");
-        self.open_elements.pop(); // Pop the p element itself
     }
 
     // Adjusts attributes names in the given token for SVG
@@ -3293,7 +3333,7 @@ impl<'a> Html5Parser<'a> {
             let mut new_attributes = HashMap::new();
             for (name, value) in attributes.iter() {
                 if MATHML_ADJUSTMENTS.contains_key(name) {
-                    let new_name = SVG_ADJUSTMENTS.get(name).expect("svg adjustments");
+                    let new_name = MATHML_ADJUSTMENTS.get(name).unwrap();
                     new_attributes.insert(new_name.to_string(), value.clone());
                 } else {
                     new_attributes.insert(name.clone(), value.clone());
@@ -3308,14 +3348,23 @@ impl<'a> Html5Parser<'a> {
             let mut new_attributes = HashMap::new();
             for (name, value) in attributes.iter() {
                 if XML_ADJUSTMENTS.contains_key(name) {
-                    let new_name = SVG_ADJUSTMENTS.get(name).expect("svg adjustments");
-                    new_attributes.insert(new_name.to_string(), value.clone());
+                    // @TODO
+                    // let new_name = XML_ADJUSTMENTS.get(name).unwrap();
+                    // new_attributes.insert(new_name.to_string(), value.clone());
                 } else {
                     new_attributes.insert(name.clone(), value.clone());
                 }
             }
             *attributes = new_attributes;
         }
+    }
+
+    fn insert_html_document(&mut self, token: &Token) -> NodeId {
+        let node = self.create_node(token, HTML_NAMESPACE);
+
+        let node_id = self.document.add_node(node, 0.into());
+        self.open_elements.push(node_id);
+        return node_id;
     }
 
     fn insert_html_element(&mut self, token: &Token) -> NodeId {
