@@ -222,7 +222,7 @@ fn match_error(got_err: &Error, expected_err: &Error) {
 }
 
 // #[test_case("tests1.dat")]
-#[test_case("tests2.dat")]
+// #[test_case("tests2.dat")]
 // #[test_case("tests3.dat")]
 // #[test_case("tests4.dat")]
 // #[test_case("tests5.dat")]
@@ -251,7 +251,7 @@ fn match_error(got_err: &Error, expected_err: &Error) {
 // #[test_case("search-element.dat")]
 // #[test_case("svg.dat")]
 // #[test_case("tables01.dat")]
-// #[test_case("template.dat")]
+#[test_case("template.dat")]
 // #[test_case("tests_innerHTML_1.dat")]
 // #[test_case("tricky01.dat")]
 // #[test_case("webkit01.dat")]

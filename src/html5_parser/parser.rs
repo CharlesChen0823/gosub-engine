@@ -2807,7 +2807,78 @@ impl<'a> Html5Parser<'a> {
 
     // Handle insertion mode "in_template"
     fn handle_in_template(&mut self) {
-        todo!()
+        match &self.current_token {
+            Token::TextToken { .. } => self.handle_in_body(),
+            Token::CommentToken { .. } => self.handle_in_body(),
+            Token::DocTypeToken { .. } => self.handle_in_body(),
+            Token::StartTagToken { name, .. }
+                if name == "base"
+                    || name == "basefont"
+                    || name == "bgsound"
+                    || name == "link"
+                    || name == "meta"
+                    || name == "noframes"
+                    || name == "script"
+                    || name == "style"
+                    || name == "template"
+                    || name == "title" =>
+            {
+                self.handle_in_head();
+            }
+            Token::EndTagToken { name, .. } if name == "template" => self.handle_in_head(),
+            Token::StartTagToken { name, .. }
+                if ["caption", "colgroup", "tbody", "tfoot", "thead"].contains(&name.as_str()) =>
+            {
+                self.template_insertion_mode.pop();
+                self.template_insertion_mode.push(InsertionMode::InTable);
+                self.insertion_mode = InsertionMode::InTable;
+                self.reprocess_token = true;
+            }
+            Token::StartTagToken { name, .. } if name == "col" => {
+                self.template_insertion_mode.pop();
+                self.template_insertion_mode
+                    .push(InsertionMode::InColumnGroup);
+                self.insertion_mode = InsertionMode::InColumnGroup;
+                self.reprocess_token = true;
+            }
+            Token::StartTagToken { name, .. } if name == "tr" => {
+                self.template_insertion_mode.pop();
+                self.template_insertion_mode
+                    .push(InsertionMode::InTableBody);
+                self.insertion_mode = InsertionMode::InTableBody;
+                self.reprocess_token = true;
+            }
+            Token::StartTagToken { name, .. } if name == "td" || name == "th" => {
+                self.template_insertion_mode.pop();
+                self.template_insertion_mode.push(InsertionMode::InRow);
+                self.insertion_mode = InsertionMode::InRow;
+                self.reprocess_token = true;
+            }
+            Token::StartTagToken { .. } => {
+                self.template_insertion_mode.pop();
+                self.template_insertion_mode.push(InsertionMode::InBody);
+                self.insertion_mode = InsertionMode::InBody;
+                self.reprocess_token = true;
+            }
+            Token::EndTagToken { .. } => {
+                self.parse_error("table end tag not allowed in in template insertion mode");
+                // ignore token
+                return;
+            }
+            Token::EofToken => {
+                if !open_elements_has!(self, "template") {
+                    self.stop_parsing();
+                    return;
+                }
+                self.parse_error("eof token not allowed in template insertion mode");
+
+                pop_until!(self, "template");
+                self.active_formatting_elements_clear_until_marker();
+                self.template_insertion_mode.pop();
+                self.reset_insertion_mode();
+                self.reprocess_token = true;
+            }
+        }
     }
 
     // Handle insertion mode "in_table"
@@ -3347,9 +3418,11 @@ impl<'a> Html5Parser<'a> {
             let mut new_attributes = HashMap::new();
             for (name, value) in attributes.iter() {
                 if XML_ADJUSTMENTS.contains_key(name) {
-                    // @TODO
-                    // let new_name = XML_ADJUSTMENTS.get(name).unwrap();
-                    // new_attributes.insert(new_name.to_string(), value.clone());
+                    let xml_key = XML_ADJUSTMENTS.get(name).unwrap();
+                    new_attributes.insert(
+                        format!("{{{}}}{}", xml_key.2, xml_key.1).to_string(),
+                        value.clone(),
+                    );
                 } else {
                     new_attributes.insert(name.clone(), value.clone());
                 }
