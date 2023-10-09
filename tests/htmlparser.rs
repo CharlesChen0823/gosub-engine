@@ -192,6 +192,23 @@ fn match_node(
                     println!("✅  {}", expected[expected_id as usize]);
                 }
             }
+            NodeData::Comment(comment) => {
+                let value = format!(
+                    "|{}<!-- {} -->",
+                    " ".repeat(indent as usize * 2 + 1),
+                    comment.value()
+                );
+                if value != expected[expected_id as usize] {
+                    println!(
+                        "❌ {}, Found unexpected text node: <!-- {} -->",
+                        expected[expected_id as usize],
+                        comment.value()
+                    );
+                    return None;
+                } else {
+                    println!("✅  {}", expected[expected_id as usize]);
+                }
+            }
             _ => {}
         }
     }
