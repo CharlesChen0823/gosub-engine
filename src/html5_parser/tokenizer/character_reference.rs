@@ -256,6 +256,7 @@ impl<'a> Tokenizer<'a> {
                     if char_ref_code == 0 && !overflow {
                         self.stream.read_char();
                         self.parse_error(ParserError::NullCharacterReference);
+                        self.stream.unread();
                         char_ref_code = CHAR_REPLACEMENT as u32;
                     }
 
@@ -280,7 +281,7 @@ impl<'a> Tokenizer<'a> {
                     }
                     if self.is_control_char(char_ref_code) || char_ref_code == 0x0D {
                         self.stream.read_char();
-                        self.stream.read_char();
+                        // self.stream.read_char();
                         self.parse_error(ParserError::ControlCharacterReference);
                         // self.stream.unread();
                         self.stream.unread();
