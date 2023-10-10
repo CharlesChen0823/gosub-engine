@@ -1770,8 +1770,8 @@ impl<'a> Html5Parser<'a> {
                 .document
                 .get_node_by_id(node_id.unwrap())
                 .expect("node not found");
-            let node_namespace = node.namespace.clone().unwrap();
-            node_namespace
+            
+            node.namespace.clone().unwrap()
         } else {
             HTML_NAMESPACE.into()
         };
