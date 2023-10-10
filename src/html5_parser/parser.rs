@@ -1765,12 +1765,8 @@ impl<'a> Html5Parser<'a> {
 
     // checks if the given element is in given scope
     fn is_in_scope_new(&self, tag: &str, scope: Scope, node_id: Option<NodeId>) -> bool {
-        let namespace: String = if node_id.is_some() {
-            let node = self
-                .document
-                .get_node_by_id(node_id.unwrap())
-                .expect("node not found");
-            
+        let namespace: String = if let Some(id) = node_id {
+            let node = self.document.get_node_by_id(id).expect("node not found");
             node.namespace.clone().unwrap()
         } else {
             HTML_NAMESPACE.into()
@@ -1778,11 +1774,8 @@ impl<'a> Html5Parser<'a> {
 
         for &id in self.open_elements.iter().rev() {
             let node = self.document.get_node_by_id(id).expect("node not found");
-            if node_id.is_some() {
-                let in_node = self
-                    .document
-                    .get_node_by_id(node_id.unwrap())
-                    .expect("node not found");
+            if let Some(nid) = node_id {
+                let in_node = self.document.get_node_by_id(nid).expect("node not found");
                 if node.namespace == in_node.namespace && node.name == in_node.name {
                     return true;
                 }
@@ -3763,13 +3756,13 @@ mod test {
         assert!(!parser.is_in_scope("div", Scope::Button));
         assert!(!parser.is_in_scope("div", Scope::Table));
         assert!(!parser.is_in_scope("div", Scope::Select));
-        
+
         assert!(!parser.is_in_scope("tr", Scope::Regular));
         assert!(!parser.is_in_scope("tr", Scope::ListItem));
         assert!(!parser.is_in_scope("tr", Scope::Button));
         assert!(parser.is_in_scope("tr", Scope::Table));
         assert!(!parser.is_in_scope("tr", Scope::Select));
-        
+
         assert!(!parser.is_in_scope("xmp", Scope::Regular));
         assert!(!parser.is_in_scope("xmp", Scope::ListItem));
         assert!(!parser.is_in_scope("xmp", Scope::Button));
