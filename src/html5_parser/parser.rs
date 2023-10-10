@@ -1995,6 +1995,7 @@ impl<'a> Html5Parser<'a> {
                     || name == "nav"
                     || name == "ol"
                     || name == "p"
+                    || name == "search"
                     || name == "section"
                     || name == "summary"
                     || name == "ul" =>
@@ -2139,6 +2140,7 @@ impl<'a> Html5Parser<'a> {
                     || name == "nav"
                     || name == "ol"
                     || name == "pre"
+                    || name == "search"
                     || name == "section"
                     || name == "summary"
                     || name == "ul" =>
@@ -2480,8 +2482,7 @@ impl<'a> Html5Parser<'a> {
                     self.close_p_element();
                 }
 
-                let node = self.create_node(&self.current_token, HTML_NAMESPACE);
-                self.document.add_node(node, current_node!(self).id);
+                self.insert_html_element(&self.current_token.clone());
                 self.open_elements.pop();
 
                 acknowledge_closing_tag!(self, *is_self_closing);
@@ -2567,8 +2568,7 @@ impl<'a> Html5Parser<'a> {
                     self.parse_error("rb or rtc not in scope");
                 }
 
-                let node = self.create_node(&self.current_token, HTML_NAMESPACE);
-                self.document.add_node(node, current_node!(self).id);
+                self.insert_foreign_element(&self.current_token.clone(), HTML_NAMESPACE.into());
             }
             Token::StartTagToken { name, .. } if name == "rp" || name == "rt" => {
                 if self.is_in_scope("ruby", Scope::Regular) {
@@ -2579,8 +2579,7 @@ impl<'a> Html5Parser<'a> {
                     self.parse_error("rp or rt not in scope");
                 }
 
-                let node = self.create_node(&self.current_token, HTML_NAMESPACE);
-                self.document.add_node(node, current_node!(self).id);
+                self.insert_foreign_element(&self.current_token.clone(), HTML_NAMESPACE.into());
             }
             Token::StartTagToken {
                 name,
@@ -3437,6 +3436,7 @@ impl<'a> Html5Parser<'a> {
     }
 
     fn insert_html_element(&mut self, token: &Token) -> NodeId {
+        // TODO fixed default namespace is wrong
         self.insert_foreign_element(token, Some(HTML_NAMESPACE))
     }
 

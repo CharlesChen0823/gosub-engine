@@ -147,6 +147,16 @@ impl Document {
         self.arena.attach_node(parent_id, node_id);
     }
 
+    pub fn reparent_children(&mut self, current_node_id: NodeId, new_parent_id: NodeId) {
+        let current_node = self.arena.get_node(current_node_id).expect("node not found").clone();
+        for idx in 0..current_node.children.len() {
+            let child = current_node.children[idx];
+            self.arena.attach_node(new_parent_id, child);
+        }
+        self.arena.get_node_mut(current_node_id).unwrap().children.clear();
+    }
+
+
     pub fn relocate(&mut self, node_id: NodeId, parent_id: NodeId) {
         // Remove the node from its current parent (if any)
         let cur_parent_id = self.arena.get_node(node_id).expect("node not found").parent;

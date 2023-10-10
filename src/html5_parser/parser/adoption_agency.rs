@@ -235,9 +235,10 @@ impl<'a> Html5Parser<'a> {
             let new_element_id = self.document.add_node(new_element, furthest_block_id);
 
             // Step 4.16
-            for child in furthest_block_node.children.iter() {
-                self.document.relocate(*child, new_element_id);
-            }
+            self.document.reparent_children(furthest_block_id, new_element_id);
+            // for child in furthest_block_node.children.iter() {
+            //     self.document.relocate(*child, new_element_id);
+            // }
 
             // Step 4.18
             // if the bookmark_afe is BEFORE the formatting_elements_idx_afe, then we need to adjust
