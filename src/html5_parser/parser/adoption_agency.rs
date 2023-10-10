@@ -116,7 +116,7 @@ impl<'a> Html5Parser<'a> {
 
             let furthest_block_idx_oe = furthest_block_idx_oe.expect("furthest block not found");
             let furthest_block_id = open_elements_get!(self, furthest_block_idx_oe).id;
-            let furthest_block_node = self
+            let _furthest_block_node = self
                 .document
                 .get_node_by_id(furthest_block_id)
                 .expect("node not found")

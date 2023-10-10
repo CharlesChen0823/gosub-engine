@@ -1547,14 +1547,14 @@ impl<'a> Html5Parser<'a> {
                 force_quirks,
             } => {
                 let mut val = String::from("!DOCTYPE ");
-                val.push_str(format!("{}", name.as_ref().unwrap_or(&"".to_string())).as_str());
+                val.push_str(name.as_ref().unwrap_or(&"".to_string()).to_string().as_str());
                 if pub_identifier.is_some() || sys_identifier.is_some() {
                     if !*force_quirks {
                         val.push_str(
                             format!(
                                 " \"{}\" \"{}\"",
-                                pub_identifier.as_deref().unwrap_or("").to_string(),
-                                sys_identifier.as_deref().unwrap_or("").to_string()
+                                pub_identifier.as_deref().unwrap_or(""),
+                                sys_identifier.as_deref().unwrap_or("")
                             )
                             .as_str(),
                         );
@@ -1562,8 +1562,8 @@ impl<'a> Html5Parser<'a> {
                         val.push_str(
                             format!(
                                 " {} {}",
-                                pub_identifier.as_deref().unwrap_or("").to_string(),
-                                sys_identifier.as_deref().unwrap_or("").to_string()
+                                pub_identifier.as_deref().unwrap_or(""),
+                                sys_identifier.as_deref().unwrap_or("")
                             )
                             .as_str(),
                         );
@@ -2859,7 +2859,6 @@ impl<'a> Html5Parser<'a> {
             Token::EndTagToken { .. } => {
                 self.parse_error("table end tag not allowed in in template insertion mode");
                 // ignore token
-                return;
             }
             Token::EofToken => {
                 if !open_elements_has!(self, "template") {
@@ -3110,7 +3109,6 @@ impl<'a> Html5Parser<'a> {
                 } else {
                     self.parse_error("optgroup end tag not allowed in in select insertion mode");
                     // ignore token
-                    return;
                 }
             }
             Token::EndTagToken { name, .. } if name == "option" => {
@@ -3119,7 +3117,6 @@ impl<'a> Html5Parser<'a> {
                 } else {
                     self.parse_error("option end tag not allowed in in select insertion mode");
                     // ignore token
-                    return;
                 }
             }
             Token::EndTagToken { name, .. } if name == "select" => {
@@ -3432,7 +3429,7 @@ impl<'a> Html5Parser<'a> {
 
         let node_id = self.document.add_node(node, 0.into());
         self.open_elements.push(node_id);
-        return node_id;
+        node_id
     }
 
     fn insert_html_element(&mut self, token: &Token) -> NodeId {
