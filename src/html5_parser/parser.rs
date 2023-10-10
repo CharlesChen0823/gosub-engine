@@ -4,7 +4,7 @@ mod quirks;
 
 // ------------------------------------------------------------
 
-use super::node::NodeId;
+use super::node::{NodeId, SCOPE_ELEMENTS};
 use crate::html5_parser::element_class::ElementClass;
 use crate::html5_parser::error_logger::{ErrorLogger, ParseError, ParserError};
 use crate::html5_parser::input_stream::InputStream;
@@ -341,7 +341,10 @@ impl<'a> Html5Parser<'a> {
                 break;
             }
 
-            // println!("Token: {}", self.current_token);
+            println!(
+                "Token: {}, self.insertion_mode {:?}",
+                self.current_token, self.insertion_mode
+            );
 
             match self.insertion_mode {
                 // Checked: 1
@@ -1547,7 +1550,12 @@ impl<'a> Html5Parser<'a> {
                 force_quirks,
             } => {
                 let mut val = String::from("!DOCTYPE ");
-                val.push_str(name.as_ref().unwrap_or(&"".to_string()).to_string().as_str());
+                val.push_str(
+                    name.as_ref()
+                        .unwrap_or(&"".to_string())
+                        .to_string()
+                        .as_str(),
+                );
                 if pub_identifier.is_some() || sys_identifier.is_some() {
                     if !*force_quirks {
                         val.push_str(
@@ -1753,6 +1761,93 @@ impl<'a> Html5Parser<'a> {
             }
             self.open_elements.pop();
         }
+    }
+
+    // checks if the given element is in given scope
+    fn is_in_scope_new(&self, tag: &str, scope: Scope, node_id: Option<NodeId>) -> bool {
+        let namespace: String = if node_id.is_some() {
+            let node = self
+                .document
+                .get_node_by_id(node_id.unwrap())
+                .expect("node not found");
+            let node_namespace = node.namespace.clone().unwrap();
+            node_namespace
+        } else {
+            HTML_NAMESPACE.into()
+        };
+
+        for &id in self.open_elements.iter().rev() {
+            let node = self.document.get_node_by_id(id).expect("node not found");
+            if node_id.is_some() {
+                let in_node = self
+                    .document
+                    .get_node_by_id(node_id.unwrap())
+                    .expect("node not found");
+                if node.namespace == in_node.namespace && node.name == in_node.name {
+                    return true;
+                }
+            } else if node_id.is_none() {
+                if node.namespace == Some(namespace.clone()) && node.name == tag {
+                    return true;
+                }
+            } else {
+                match scope {
+                    Scope::Regular => {
+                        if SCOPE_ELEMENTS.contains(&node.name.as_str())
+                            && node.namespace == Some(HTML_NAMESPACE.into())
+                        {
+                            return false;
+                        }
+
+                        if ["mi", "mo", "mn", "ms", "mtext", "annotation-xml"]
+                            .contains(&node.name.as_str())
+                            && node.namespace == Some(MATHML_NAMESPACE.into())
+                        {
+                            return false;
+                        }
+
+                        if ["foreignObject", "desc", "title"].contains(&node.name.as_str())
+                            && node.namespace == Some(SVG_NAMESPACE.into())
+                        {
+                            return false;
+                        }
+                    }
+                    Scope::Button => {
+                        if (SCOPE_ELEMENTS.contains(&node.name.as_str())
+                            || "button" == node.name.as_str())
+                            && node.namespace == Some(HTML_NAMESPACE.into())
+                        {
+                            return false;
+                        }
+                    }
+                    Scope::ListItem => {
+                        if (SCOPE_ELEMENTS.contains(&node.name.as_str())
+                            || ["ol", "ul"].contains(&node.name.as_str()))
+                            && node.namespace == Some(HTML_NAMESPACE.into())
+                        {
+                            return false;
+                        }
+                    }
+                    Scope::Table => {
+                        if ["html", "table", "template"].contains(&node.name.as_str())
+                            && node.namespace == Some(HTML_NAMESPACE.into())
+                        {
+                            return false;
+                        }
+                    }
+                    Scope::Select => {
+                        // Note: NOT contains instead of contains
+                        if !(["optgroup", "option"].contains(&node.name.as_str())
+                            && node.namespace == Some(HTML_NAMESPACE.into()))
+                        {
+                            return false;
+                        }
+                    }
+                }
+            }
+        }
+
+        false
     }
 
     // Checks if the given element is in given scope
@@ -3668,13 +3763,13 @@ mod test {
         assert!(!parser.is_in_scope("div", Scope::Button));
         assert!(!parser.is_in_scope("div", Scope::Table));
         assert!(!parser.is_in_scope("div", Scope::Select));
-
+        
         assert!(!parser.is_in_scope("tr", Scope::Regular));
         assert!(!parser.is_in_scope("tr", Scope::ListItem));
         assert!(!parser.is_in_scope("tr", Scope::Button));
         assert!(parser.is_in_scope("tr", Scope::Table));
         assert!(!parser.is_in_scope("tr", Scope::Select));
-
+        
         assert!(!parser.is_in_scope("xmp", Scope::Regular));
         assert!(!parser.is_in_scope("xmp", Scope::ListItem));
         assert!(!parser.is_in_scope("xmp", Scope::Button));

@@ -262,6 +262,10 @@ impl NodeTrait for Node {
     }
 }
 
+pub static SCOPE_ELEMENTS: [&str; 9] = [
+    "applet", "caption", "html", "table", "td", "th", "marquee", "object", "template",
+];
+
 pub static FORMATTING_HTML_ELEMENTS: [&str; 14] = [
     "a", "b", "big", "code", "em", "font", "i", "nobr", "s", "small", "strike", "strong", "tt", "u",
 ];
