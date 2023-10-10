@@ -2,7 +2,7 @@
 name = "gosub-engine"
 version = "0.1.0"
 edition = "2021"
-rust-version = "1.72"
+rust-version = "1.73"
 authors = ["Joshua Thijssen <jaytaph@deadcode.nl>"]
 description = "html5 browser engine"
 license = "MIT"
