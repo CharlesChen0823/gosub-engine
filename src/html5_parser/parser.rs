@@ -12,7 +12,7 @@ use crate::html5_parser::node::data::text::TextData;
 use crate::html5_parser::node::{Node, NodeData, HTML_NAMESPACE, MATHML_NAMESPACE, SVG_NAMESPACE};
 use crate::html5_parser::parser::adoption_agency::AdoptionResult;
 use crate::html5_parser::parser::attr_replacements::{
-    MATHML_ADJUSTMENTS, SVG_ADJUSTMENTS, XML_ADJUSTMENTS,
+    MATHML_ADJUSTMENTS, SVG_ADJUSTMENTS_ATTRIBUTES, XML_ADJUSTMENTS,
 };
 use crate::html5_parser::parser::document::{Document, DocumentType};
 use crate::html5_parser::parser::quirks::QuirksMode;
@@ -2964,6 +2964,114 @@ impl<'a> Html5Parser<'a> {
         }
     }
 
+    // hanlde tokens in foreign content
+    fn handle_in_foreign_content(&mut self) {
+        match self.current_token.clone() {
+            Token::EofToken {..} => {
+                // TODO What?
+            }
+            Token::TextToken { .. } if self.current_token.is_null() => {
+                self.parse_error("null character not allowed in in body insertion mode");
+                // TODO replace current_token data
+
+            }
+            Token::TextToken { .. } if self.current_token.is_empty_or_white() => {
+                // TODO fixed
+                self.create_or_merge_text(self.current_token.clone());
+            }
+            Token::TextToken { .. } => {
+                self.create_or_merge_text(self.current_token.clone());
+                self.frameset_ok = false;
+            }
+            Token::CommentToken { .. } => {
+                let node = self.create_node(&self.current_token, HTML_NAMESPACE);
+                self.document.add_node(node, current_node!(self).id);
+            }
+            Token::DocTypeToken { .. } => {
+                self.parse_error("doctype not allowed in in body insertion mode");
+                // ignore token
+            }
+            Token::StartTagToken { name, .. }
+                if [
+                    "b",
+                    "big",
+                    "blockquote",
+                    "body",
+                    "br",
+                    "center",
+                    "code",
+                    "dd",
+                    "div",
+                    "dl",
+                    "dt",
+                    "em",
+                    "embed",
+                    "h1",
+                    "h2",
+                    "h3",
+                    "h4",
+                    "h5",
+                    "h6",
+                    "head",
+                    "hr",
+                    "i",
+                    "img",
+                    "li",
+                    "listing",
+                    "menu",
+                    "meta",
+                    "nobr",
+                    "ol",
+                    "p",
+                    "pre",
+                    "ruby",
+                    "s",
+                    "small",
+                    "span",
+                    "strong",
+                    "strike",
+                    "sub",
+                    "sup",
+                    "table",
+                    "tt",
+                    "u",
+                    "ul",
+                    "var",
+                ]
+                .contains(&name.as_str()) =>
+            {
+                self.parse_error("current token not allowed in foreign content");
+                let node = current_node!(self);
+
+                self.reprocess_token = true;
+                return;
+            }
+            Token::StartTagToken {
+                name, attributes, ..
+            } if name == "font"
+                && (attributes.contains_key("color")
+                    || attributes.contains_key("face")
+                    || attributes.contains_key("size")) =>
+            {
+                self.parse_error("current token not allowed in foreign content");
+                let node = current_node!(self);
+
+                self.reprocess_token = true;
+                return;
+            }
+            Token::EndTagToken { name, .. } if name == "br" || name == "p" => {}
+            Token::StartTagToken { .. } => {
+
+            }
+            Token::EndTagToken { name, .. } if name == "script" && current_node!(self).name == "script" => {
+
+            }
+            Token::EndTagToken { .. } => {
+
+            }
+        }
+    }
+
     // Handle insertion mode "in_table"
     fn handle_in_table(&mut self) {
         let mut anything_else = false;
@@ -3467,8 +3575,8 @@ impl<'a> Html5Parser<'a> {
         if let Token::StartTagToken { attributes, .. } = token {
             let mut new_attributes = HashMap::new();
             for (name, value) in attributes.iter() {
-                if SVG_ADJUSTMENTS.contains_key(name) {
-                    let new_name = SVG_ADJUSTMENTS.get(name).expect("svg adjustments");
+                if SVG_ADJUSTMENTS_ATTRIBUTES.contains_key(name) {
+                    let new_name = SVG_ADJUSTMENTS_ATTRIBUTES.get(name).expect("svg adjustments");
                     new_attributes.insert(new_name.to_string(), value.clone());
                 } else {
                     new_attributes.insert(name.clone(), value.clone());
