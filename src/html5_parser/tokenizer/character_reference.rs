@@ -1,6 +1,6 @@
 use crate::html5_parser::error_logger::ParserError;
 use crate::html5_parser::input_stream::Element;
-use crate::read_char;
+// use crate::read_char;
 
 extern crate lazy_static;
 use crate::html5_parser::input_stream::SeekMode::SeekCur;
@@ -8,7 +8,7 @@ use crate::html5_parser::tokenizer::replacement_tables::{TOKEN_NAMED_CHARS, TOKE
 use crate::html5_parser::tokenizer::{Tokenizer, CHAR_REPLACEMENT};
 use lazy_static::lazy_static;
 
-// Different states for the character references
+/// Different states for the character references
 pub enum CcrState {
     CharacterReference,
     NamedCharacterReference,
@@ -21,22 +21,11 @@ pub enum CcrState {
     NumericalCharacterReferenceEnd,
 }
 
-macro_rules! consume_temp_buffer {
-    ($self:expr, $as_attribute:expr) => {
-        if $as_attribute {
-            $self.current_attr_value.push_str(&$self.temporary_buffer);
-        } else {
-            $self.consumed.push_str(&$self.temporary_buffer);
-        }
-        $self.temporary_buffer.clear();
-    };
-}
-
 impl<'a> Tokenizer<'a> {
-    // Consumes a character reference and places this in the tokenizer consume buffer
-    // ref: 8.2.4.69 Tokenizing character references
-
-    // @TODO: fix additional allowed char
+    /// Consumes a character reference and places this in the tokenizer consume buffer
+    /// ref: 8.2.4.69 Tokenizing character references
+    ///
+    /// @TODO: fix additional allowed char
     pub fn consume_character_reference(
         &mut self,
         _additional_allowed_char: Option<Element>,
@@ -51,7 +40,7 @@ impl<'a> Tokenizer<'a> {
                     self.temporary_buffer.clear();
                     self.temporary_buffer.push('&');
 
-                    let c = read_char!(self);
+                    let c = self.read_char();
                     match c {
                         Element::Utf8(ch) if ch.is_ascii_alphanumeric() => {
                             self.stream.unread();
@@ -62,7 +51,7 @@ impl<'a> Tokenizer<'a> {
                             ccr_state = CcrState::NumericCharacterReference;
                         }
                         _ => {
-                            consume_temp_buffer!(self, as_attribute);
+                            self.consume_temp_buffer(as_attribute);
 
                             self.stream.unread();
                             return;
@@ -83,7 +72,7 @@ impl<'a> Tokenizer<'a> {
                                 self.temporary_buffer.push(c);
                             }
 
-                            consume_temp_buffer!(self, as_attribute);
+                            self.consume_temp_buffer(as_attribute);
                             return;
                         }
 
@@ -109,11 +98,11 @@ impl<'a> Tokenizer<'a> {
                         return;
                     }
 
-                    consume_temp_buffer!(self, as_attribute);
+                    self.consume_temp_buffer(as_attribute);
                     ccr_state = CcrState::AmbiguousAmpersand;
                 }
                 CcrState::AmbiguousAmpersand => {
-                    let c = read_char!(self);
+                    let c = self.read_char();
                     match c {
                         // Element::Eof => return,
                         Element::Utf8(ch) if ch.is_ascii_alphanumeric() => {
@@ -137,7 +126,7 @@ impl<'a> Tokenizer<'a> {
                 CcrState::NumericCharacterReference => {
                     char_ref_code = Some(0);
 
-                    let c = read_char!(self);
+                    let c = self.read_char();
                     match c {
                         // Element::Eof => ccr_state = CcrState::NumericalCharacterReferenceEndState,
                         Element::Utf8('X') | Element::Utf8('x') => {
@@ -151,7 +140,7 @@ impl<'a> Tokenizer<'a> {
                     }
                 }
                 CcrState::HexadecimalCharacterReferenceStart => {
-                    let c = read_char!(self);
+                    let c = self.read_char();
                     match c {
                         // Element::Eof => ccr_state = CcrState::NumericalCharacterReferenceEndState,
                         Element::Utf8('0'..='9')
@@ -164,7 +153,7 @@ impl<'a> Tokenizer<'a> {
                             self.parse_error(
                                 ParserError::AbsenceOfDigitsInNumericCharacterReference,
                             );
-                            consume_temp_buffer!(self, as_attribute);
+                            self.consume_temp_buffer(as_attribute);
 
                             self.stream.unread();
                             return;
@@ -172,7 +161,7 @@ impl<'a> Tokenizer<'a> {
                     }
                 }
                 CcrState::DecimalCharacterReferenceStart => {
-                    let c = read_char!(self);
+                    let c = self.read_char();
                     match c {
                         Element::Utf8('0'..='9') => {
                             self.stream.unread();
@@ -182,7 +171,7 @@ impl<'a> Tokenizer<'a> {
                             self.parse_error(
                                 ParserError::AbsenceOfDigitsInNumericCharacterReference,
                             );
-                            consume_temp_buffer!(self, as_attribute);
+                            self.consume_temp_buffer(as_attribute);
 
                             self.stream.unread();
                             return;
@@ -190,7 +179,7 @@ impl<'a> Tokenizer<'a> {
                     }
                 }
                 CcrState::HexadecimalCharacterReference => {
-                    let c = read_char!(self);
+                    let c = self.read_char();
                     match c {
                         // Element::Eof => ccr_state = CcrState::NumericalCharacterReferenceEndState,
                         Element::Utf8('0'..='9') => {
@@ -228,7 +217,7 @@ impl<'a> Tokenizer<'a> {
                     }
                 }
                 CcrState::DecimalCharacterReference => {
-                    let c = read_char!(self);
+                    let c = self.read_char();
                     match c {
                         // Element::Eof => ccr_state = CcrState::NumericalCharacterReferenceEndState,
                         Element::Utf8('0'..='9') => {
@@ -281,9 +270,7 @@ impl<'a> Tokenizer<'a> {
                     }
                     if self.is_control_char(char_ref_code) || char_ref_code == 0x0D {
                         self.stream.read_char();
-                        // self.stream.read_char();
                         self.parse_error(ParserError::ControlCharacterReference);
-                        // self.stream.unread();
                         self.stream.unread();
 
                         if TOKEN_REPLACEMENTS.contains_key(&char_ref_code) {
@@ -294,12 +281,21 @@ impl<'a> Tokenizer<'a> {
                     self.temporary_buffer.clear();
                     let c = char::from_u32(char_ref_code).unwrap_or(CHAR_REPLACEMENT);
                     self.temporary_buffer.push(c);
-                    consume_temp_buffer!(self, as_attribute);
+                    self.consume_temp_buffer(as_attribute);
 
                     return;
                 }
             }
         }
+    }
+
+    fn consume_temp_buffer(&mut self, as_attribute: bool) {
+        if as_attribute {
+            self.current_attr_value.push_str(&self.temporary_buffer);
+        } else {
+            self.consumed.push_str(&self.temporary_buffer);
+        }
+        self.temporary_buffer.clear();
     }
 
     pub(crate) fn is_surrogate(&self, num: u32) -> bool {
@@ -326,8 +322,8 @@ impl<'a> Tokenizer<'a> {
         (0x0001..=0x001F).contains(&num) || (0x007F..=0x009F).contains(&num)
     }
 
-    // Finds the longest entity from the current position in the stream. Returns the entity
-    // replacement OR None when no entity has been found.
+    /// Finds the longest entity from the current position in the stream. Returns the entity
+    /// replacement OR None when no entity has been found.
     fn find_entity(&mut self) -> Option<String> {
         let s = self.stream.look_ahead_slice(*LONGEST_ENTITY_LENGTH);
         for i in (0..=s.len()).rev() {

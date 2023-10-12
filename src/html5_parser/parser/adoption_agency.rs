@@ -13,14 +13,12 @@ pub enum AdoptionResult {
 }
 
 impl<'a> Html5Parser<'a> {
-    /**
-     * When we talk about nodes, there are 3 contexts to consider:
-     *
-     * - The actual node data. This is called "node" in the code.
-     * - The node id. This is called "node_id" in the code.
-     * - The node index. This is called "node_idx" in the code. This is the index of the node in
-     *   either the open_elements or active_formatting_elements stack.
-     */
+    /// When we talk about nodes, there are 3 contexts to consider:
+    ///
+    /// - The actual node data. This is called "node" in the code.
+    /// - The node id. This is called "node_id" in the code.
+    /// - The node index. This is called "node_idx" in the code. This is the index of the node in  
+    /// either the open_elements or active_formatting_elements stack.
     pub fn run_adoption_agency(&mut self, token: &Token) -> AdoptionResult {
         // Step 1
         let subject = match token {
@@ -30,8 +28,8 @@ impl<'a> Html5Parser<'a> {
         };
 
         // Step 2
-        let current_node_id = current_node!(self).id;
-        if current_node!(self).name == *subject
+        let current_node_id = self.current_node().id;
+        if self.current_node().name == *subject
             && !self
                 .active_formatting_elements
                 .iter()
@@ -72,7 +70,7 @@ impl<'a> Html5Parser<'a> {
                 .clone();
 
             // Step 4.4
-            if !open_elements_has_id!(self, formatting_element_id) {
+            if !self.open_elements_has_id(formatting_element_id) {
                 self.parse_error("formatting element not in open elements");
                 self.active_formatting_elements
                     .remove(formatting_element_idx_afe);
@@ -115,8 +113,8 @@ impl<'a> Html5Parser<'a> {
             }
 
             let furthest_block_idx_oe = furthest_block_idx_oe.expect("furthest block not found");
-            let furthest_block_id = open_elements_get!(self, furthest_block_idx_oe).id;
-            let _furthest_block_node = self
+            let furthest_block_id = self.open_elements_get(furthest_block_idx_oe).id;
+            let furthest_block_node = self
                 .document
                 .get_node_by_id(furthest_block_id)
                 .expect("node not found")
@@ -124,7 +122,7 @@ impl<'a> Html5Parser<'a> {
 
             // Step 4.9
             // Find the index of the wanted formatting element id in the open elements stack
-            let idx = open_elements_find_index!(self, formatting_element_id);
+            let idx = self.open_elements_find_index(formatting_element_id);
             let common_ancestor_id = *self.open_elements.get(idx - 1).expect("node not found");
 
             // Step 4.10
@@ -133,7 +131,7 @@ impl<'a> Html5Parser<'a> {
             // Step 4.11
             let mut node_idx_oe = furthest_block_idx_oe;
             let last_node_idx_oe = furthest_block_idx_oe;
-            let mut last_node_id = open_elements_get!(self, last_node_idx_oe).id;
+            let mut last_node_id = self.open_elements_get(last_node_idx_oe).id;
 
             // Step 4.12
             let mut inner_loop_counter = 0;
@@ -145,8 +143,8 @@ impl<'a> Html5Parser<'a> {
 
                 // Step 4.13.2
                 node_idx_oe -= 1;
-                let node_id = open_elements_get!(self, node_idx_oe).id;
-                let node = get_node_by_id!(self, node_id).clone();
+                let node_id = self.open_elements_get(node_idx_oe).id;
+                let node = self.get_node_by_id(node_id).clone();
 
                 // Step 4.13.3
                 if node_id == formatting_element_id {
@@ -235,10 +233,9 @@ impl<'a> Html5Parser<'a> {
             let new_element_id = self.document.add_node(new_element, furthest_block_id);
 
             // Step 4.16
-            self.document.reparent_children(furthest_block_id, new_element_id);
-            // for child in furthest_block_node.children.iter() {
-            //     self.document.relocate(*child, new_element_id);
-            // }
+            for child in furthest_block_node.children.iter() {
+                self.document.relocate(*child, new_element_id);
+            }
 
             // Step 4.18
             // if the bookmark_afe is BEFORE the formatting_elements_idx_afe, then we need to adjust
@@ -256,12 +253,12 @@ impl<'a> Html5Parser<'a> {
             // Step 4.19
             self.open_elements
                 .insert(furthest_block_idx_oe - 1, new_element_id);
-            let idx = open_elements_find_index!(self, formatting_element_id);
+            let idx = self.open_elements_find_index(formatting_element_id);
             self.open_elements.remove(idx);
         }
     }
 
-    // Find the furthest block element in the stack of open elements that is above the formatting element
+    /// Find the furthest block element in the stack of open elements that is above the formatting element
     fn find_furthest_block_idx(&self, formatting_element_id: NodeId) -> Option<usize> {
         // Find the index of the wanted formatting element id
         let element_idx_oe = self
@@ -277,7 +274,7 @@ impl<'a> Html5Parser<'a> {
         // Iterate
         for idx in (element_idx_oe + 1)..self.open_elements.len() {
             // for idx in (0..element_idx).rev() {
-            let node = open_elements_get!(self, idx);
+            let node = self.open_elements_get(idx);
             if node.is_special() {
                 return Some(idx);
             }
@@ -286,7 +283,7 @@ impl<'a> Html5Parser<'a> {
         None
     }
 
-    // Find the formatting element with the given subject between the end of the list and the first marker (or start when there is no marker)
+    /// Find the formatting element with the given subject between the end of the list and the first marker (or start when there is no marker)
     fn find_formatting_element(&self, subject: &str) -> Option<usize> {
         if self.active_formatting_elements.is_empty() {
             return None;

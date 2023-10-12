@@ -1,4 +1,3 @@
-use crate::html5_parser::element_class::ElementClass;
 use crate::html5_parser::node::data::comment::CommentData;
 use crate::html5_parser::node::data::document::DocumentData;
 use crate::html5_parser::node::data::element::ElementData;
@@ -100,13 +99,11 @@ pub struct Node {
     pub namespace: Option<String>,
     /// actual data of the node
     pub data: NodeData,
-    /// CSS classes (only relevant for NodeType::Element, otherwise None)
-    pub classes: Option<ElementClass>,
 }
 
 impl Node {
-    // This will only compare against the tag, namespace and attributes. Both nodes could still have
-    // other parents and children.
+    /// This will only compare against the tag, namespace and attributes. Both nodes could still have
+    /// other parents and children.
     pub fn matches_tag_and_attrs(&self, other: &Self) -> bool {
         self.name == other.name && self.namespace == other.namespace && self.data == other.data
     }
@@ -122,7 +119,6 @@ impl Clone for Node {
             name: self.name.clone(),
             namespace: self.namespace.clone(),
             data: self.data.clone(),
-            classes: self.classes.clone(),
         }
     }
 }
@@ -138,7 +134,6 @@ impl Node {
             data: NodeData::Document(DocumentData::new()),
             name: "".to_string(),
             namespace: None,
-            classes: None,
         }
     }
 
@@ -152,7 +147,6 @@ impl Node {
             data: NodeData::Element(ElementData::with_name_and_attributes(name, attributes)),
             name: name.to_string(),
             namespace: Some(namespace.into()),
-            classes: Some(ElementClass::new()),
         }
     }
 
@@ -166,7 +160,6 @@ impl Node {
             data: NodeData::Comment(CommentData::with_value(value)),
             name: "".to_string(),
             namespace: None,
-            classes: None,
         }
     }
 
@@ -180,7 +173,6 @@ impl Node {
             data: NodeData::Text(TextData::with_value(value)),
             name: "".to_string(),
             namespace: None,
-            classes: None,
         }
     }
 
@@ -246,11 +238,11 @@ impl Node {
 }
 
 pub trait NodeTrait {
-    // Return the token type of the given token
+    /// Return the token type of the given token
     fn type_of(&self) -> NodeType;
 }
 
-// Each node implements the NodeTrait and has a type_of that will return the node type.
+/// Each node implements the NodeTrait and has a type_of that will return the node type.
 impl NodeTrait for Node {
     fn type_of(&self) -> NodeType {
         match self.data {
@@ -270,6 +262,7 @@ pub static FORMATTING_HTML_ELEMENTS: [&str; 14] = [
     "a", "b", "big", "code", "em", "font", "i", "nobr", "s", "small", "strike", "strong", "tt", "u",
 ];
 
+/// The HTML elements that are considered special elements
 pub static SPECIAL_HTML_ELEMENTS: [&str; 83] = [
     "address",
     "applet",
@@ -356,8 +349,10 @@ pub static SPECIAL_HTML_ELEMENTS: [&str; 83] = [
     "xmp",
 ];
 
+/// The MathML elements that are considered special elements
 pub static SPECIAL_MATHML_ELEMENTS: [&str; 6] = ["mi", "mo", "mn", "ms", "mtext", "annotation-xml"];
 
+/// The SVG elements that are considered special elements
 pub static SPECIAL_SVG_ELEMENTS: [&str; 3] = ["foreignObject", "desc", "title"];
 
 #[cfg(test)]
