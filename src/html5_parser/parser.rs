@@ -12,7 +12,7 @@ use crate::html5_parser::node::data::text::TextData;
 use crate::html5_parser::node::{Node, NodeData, HTML_NAMESPACE, MATHML_NAMESPACE, SVG_NAMESPACE};
 use crate::html5_parser::parser::adoption_agency::AdoptionResult;
 use crate::html5_parser::parser::attr_replacements::{
-    MATHML_ADJUSTMENTS, SVG_ADJUSTMENTS_ATTRIBUTES, XML_ADJUSTMENTS,
+    MATHML_ADJUSTMENTS, SVG_ADJUSTMENTS_ATTRIBUTES, SVG_ADJUSTMENTS_TAG, XML_ADJUSTMENTS,
 };
 use crate::html5_parser::parser::document::{Document, DocumentType};
 use crate::html5_parser::parser::quirks::QuirksMode;
@@ -21,6 +21,7 @@ use crate::html5_parser::tokenizer::token::Token;
 use crate::html5_parser::tokenizer::{Tokenizer, CHAR_NUL};
 use crate::types::Result;
 use std::cell::RefCell;
+use std::char::REPLACEMENT_CHARACTER;
 use std::collections::HashMap;
 use std::io::prelude::*;
 use std::rc::Rc;
@@ -2952,14 +2953,15 @@ impl<'a> Html5Parser<'a> {
 
     /// hanlde tokens in foreign content
     fn handle_in_foreign_content(&mut self) {
-        match self.current_token.clone() {
-            Token::EofToken {..} => {
+        match &self.current_token {
+            Token::EofToken { .. } => {
                 // TODO What?
             }
             Token::TextToken { .. } if self.current_token.is_null() => {
                 self.parse_error("null character not allowed in in body insertion mode");
-                // TODO replace current_token data
-
+                if let Token::TextToken { value, .. } = &mut self.current_token {
+                    *value = REPLACEMENT_CHARACTER.to_string();
+                }
             }
             Token::TextToken { .. } if self.current_token.is_empty_or_white() => {
                 // TODO fixed
@@ -3027,7 +3029,6 @@ impl<'a> Html5Parser<'a> {
                 .contains(&name.as_str()) =>
             {
                 self.parse_error("current token not allowed in foreign content");
-                let node = self.current_node();
 
                 self.reprocess_token = true;
                 return;
@@ -3040,21 +3041,54 @@ impl<'a> Html5Parser<'a> {
                     || attributes.contains_key("size")) =>
             {
                 self.parse_error("current token not allowed in foreign content");
-                let node = self.current_node();
 
                 self.reprocess_token = true;
                 return;
             }
-            Token::EndTagToken { name, .. } if name == "br" || name == "p" => {}
-            Token::StartTagToken { .. } => {
+            Token::EndTagToken { name, .. } if name == "br" || name == "p" => {
+                self.parse_error("current token not allowed in foreign content");
 
+                self.reprocess_token = true;
+                return;
             }
-            Token::EndTagToken { name, .. } if name == "script" && self.current_node().name == "script" => {
+            Token::StartTagToken {
+                name,
+                is_self_closing,
+                attributes,
+            } => {
+                let node = self.current_node();
+                let mut token = Token::StartTagToken {
+                    name: name.clone(),
+                    attributes: attributes.clone(),
+                    is_self_closing: *is_self_closing,
+                };
+                if node.namespace == Some(MATHML_NAMESPACE.into()) {
+                    self.adjust_mathml_attributes(&mut token);
+                } else if node.namespace == Some(SVG_NAMESPACE.into()) {
+                    self.adjust_svg_tag_name(&mut token);
+                    self.adjust_svg_attributes(&mut token);
+                }
 
+                self.adjust_foreign_attributes(&mut token);
+                // self.insert_foreign_element(&token, &node.namespace);
+                if *is_self_closing {
+                    if name == "script" && self.current_node().namespace == Some(SVG_NAMESPACE.into()){
+                        self.acknowledge_closing_tag(*is_self_closing);
+                    self.open_elements.pop();
+                            // TODO
+                            
+                    } else {
+                        self.open_elements.pop();
+                        self.acknowledge_closing_tag(*is_self_closing);
+                    }
+                }
             }
-            Token::EndTagToken { .. } => {
-
-            }
+            Token::EndTagToken { name, .. }
+                if name == "script" && self.current_node().name == "script" => {
+                    self.open_elements.pop();
+                    // TODO
+                }
+            Token::EndTagToken { .. } => {}
         }
     }
 
@@ -3563,13 +3597,25 @@ impl<'a> Html5Parser<'a> {
             let mut new_attributes = HashMap::new();
             for (name, value) in attributes.iter() {
                 if SVG_ADJUSTMENTS_ATTRIBUTES.contains_key(name) {
-                    let new_name = SVG_ADJUSTMENTS_ATTRIBUTES.get(name).expect("svg adjustments");
+                    let new_name = SVG_ADJUSTMENTS_ATTRIBUTES
+                        .get(name)
+                        .expect("svg adjustments");
                     new_attributes.insert(new_name.to_string(), value.clone());
                 } else {
                     new_attributes.insert(name.clone(), value.clone());
                 }
             }
             *attributes = new_attributes;
+        }
+    }
+
+    /// adjusts tag name in the given token for svg
+    fn adjust_svg_tag_name(&self, token: &mut Token) {
+        if let Token::StartTagToken { name, .. } = token {
+            if SVG_ADJUSTMENTS_TAG.contains_key(name) {
+                let new_name = SVG_ADJUSTMENTS_TAG.get(name).expect("svg adjust tag name");
+                *name = new_name.to_string()
+            }
         }
     }
 
