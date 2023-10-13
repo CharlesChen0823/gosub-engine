@@ -3589,7 +3589,6 @@ impl<'a> Html5Parser<'a> {
         }
 
         self.pop_until("p");
-        self.open_elements.pop(); // Pop the p element itself
     }
 
     /// Adjusts attributes names in the given token for SVG
@@ -3747,6 +3746,16 @@ impl<'a> Html5Parser<'a> {
 
         self.original_insertion_mode = self.insertion_mode;
         self.insertion_mode = InsertionMode::Text;
+    }
+
+    fn find_adjusted_insert_location(&self, override_node: Option<&Node>) -> NodeId {
+        let target = match override_node {
+            Some(node) => node,
+            None => self.current_node(),
+        };
+
+
+        self.current_node().id
     }
 
     fn adjusted_insert_location(&self, override_node: Option<&Node>) -> NodeId {
