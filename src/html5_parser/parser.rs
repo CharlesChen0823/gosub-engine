@@ -472,7 +472,6 @@ impl<'stream> Html5Parser<'stream> {
                                 "doctype not allowed in 'head no script' insertion mode",
                             );
                             // ignore token
-                            continue;
                         }
                         Token::StartTagToken { name, .. } if name == "html" => {
                             self.handle_in_body();
@@ -508,12 +507,10 @@ impl<'stream> Html5Parser<'stream> {
                                 "head or noscript tag not allowed in after head insertion mode",
                             );
                             // ignore token
-                            continue;
                         }
                         Token::EndTagToken { .. } => {
                             self.parse_error("end tag not allowed in after head insertion mode");
                             // ignore token
-                            continue;
                         }
                         _ => {
                             anything_else = true;
@@ -2001,8 +1998,8 @@ impl<'stream> Html5Parser<'stream> {
             Token::StartTagToken { name, .. } if name == "body" => {
                 self.parse_error("body tag not allowed in in body insertion mode");
 
-                if self.open_elements.len() > 1
-                    || open_elements_get!(self, NodeId::root().next().as_usize()).name != "body"
+                if self.open_elements.len() == 1
+                    && open_elements_get!(self, NodeId::root().next().as_usize()).name != "body"
                 {
                     // ignore token
                     return;
@@ -2047,6 +2044,16 @@ impl<'stream> Html5Parser<'stream> {
                 if !self.template_insertion_mode.is_empty() {
                     self.handle_in_template();
                 } else {
+                    if self.open_elements.iter().any(|id| {
+                        let node = get_node_by_id!(self, *id);
+                        ![
+                            "dd", "dt", "li", "optgroup", "option", "p", "rb", "rp", "rt", "rtc",
+                            "tbody", "td", "tfoot", "th", "thead", "tr", "body", "html",
+                        ]
+                        .contains(&node.name.as_str())
+                    }) {
+                        self.parse_error("not allo tag");
+                    }
                     // @TODO: do stuff
                     self.stop_parsing();
                 }
@@ -2058,7 +2065,16 @@ impl<'stream> Html5Parser<'stream> {
                     return;
                 }
 
-                // @TODO: Other stuff
+                if self.open_elements.iter().any(|id| {
+                    let node = get_node_by_id!(self, *id);
+                    ![
+                        "dd", "dt", "li", "optgroup", "option", "p", "rb", "rp", "rt", "rtc",
+                        "tbody", "td", "tfoot", "th", "thead", "tr", "body", "html",
+                    ]
+                    .contains(&node.name.as_str())
+                }) {
+                    self.parse_error("not allo tag");
+                }
 
                 self.insertion_mode = InsertionMode::AfterBody;
             }
@@ -2069,7 +2085,16 @@ impl<'stream> Html5Parser<'stream> {
                     return;
                 }
 
-                // @TODO: Other stuff
+                if self.open_elements.iter().any(|id| {
+                    let node = get_node_by_id!(self, *id);
+                    ![
+                        "dd", "dt", "li", "optgroup", "option", "p", "rb", "rp", "rt", "rtc",
+                        "tbody", "td", "tfoot", "th", "thead", "tr", "body", "html",
+                    ]
+                    .contains(&node.name.as_str())
+                }) {
+                    self.parse_error("not allo tag");
+                }
 
                 self.insertion_mode = InsertionMode::AfterBody;
                 self.reprocess_token = true;
@@ -2242,6 +2267,13 @@ impl<'stream> Html5Parser<'stream> {
                     || name == "summary"
                     || name == "ul" =>
             {
+                if name == "pre" {
+                    let node_id = self.open_elements.last().unwrap();
+                    let node = get_node_by_id!(self, *node_id);
+                    if node.name == "pre" {
+                        // TODO remove \n from previouse tokens
+                    }
+                }
                 if !self.is_in_scope(name, Scope::Regular) {
                     self.parse_error("end tag not in scope");
                     // ignore token
@@ -2514,8 +2546,7 @@ impl<'stream> Html5Parser<'stream> {
                     attributes.clear();
                 }
 
-                let node = self.create_node(&br, HTML_NAMESPACE);
-                self.add_node(node);
+                self.insert_html_element(&br);
 
                 self.open_elements.pop();
                 self.acknowledge_closing_tag(*is_self_closing);
@@ -2868,15 +2899,15 @@ impl<'stream> Html5Parser<'stream> {
             Token::StartTagToken { name, .. } if name == "template" => {
                 let node_id = self.insert_html_element(&self.current_token.clone());
 
-                {
-                    let current_node_id = current_node!(self).id;
-
-                    let mut node = get_node_by_id_mut!(self, node_id);
-                    if let NodeData::Element(data) = &mut node.data {
-                        let doc = Document::clone(&self.document);
-                        data.template_contents = Some(DocumentFragment::new(doc, current_node_id));
-                    }
-                }
+                // {
+                //     let current_node_id = current_node!(self).id;
+                //
+                //     let mut node = get_node_by_id_mut!(self, node_id);
+                //     if let NodeData::Element(data) = &mut node.data {
+                //         let doc = Document::clone(&self.document);
+                //         data.template_contents = Some(DocumentFragment::new(doc, current_node_id));
+                //     }
+                // }
 
                 self.active_formatting_elements_push_marker();
                 self.frameset_ok = false;
@@ -3712,15 +3743,6 @@ impl<'stream> Html5Parser<'stream> {
         self.document.get_mut().add_node(node, parent);
     }
 
-    fn insert_text_element(&mut self, token: &Token, insert_before: Option<NodeId>) {
-        let posi_node = match insert_before {
-            Some(node) => node,
-            _ => current_node!(self).id,
-        };
-        let node = self.create_node(token, HTML_NAMESPACE);
-        self.document.get_mut().add_node(node, posi_node);
-    }
-
     fn insert_html_document(&mut self, token: &Token) -> NodeId {
         let node = self.create_node(token, HTML_NAMESPACE);
 
@@ -3857,23 +3879,6 @@ impl<'stream> Html5Parser<'stream> {
             let current = self.open_elements[self.open_elements.len() - 1 - last_table_idx - 1];
             return current;
         }
-    }
-
-    /// Merges the text with the last child of the current node if that is also a text node
-    fn create_or_merge_text(&mut self, token: Token) {
-        let node = current_node!(self);
-
-        if let Some(last_child_id) = node.children.last() {
-            let mut last_child = get_node_by_id_mut!(self, *last_child_id);
-            if let NodeData::Text(TextData { value, .. }) = &mut last_child.data {
-                value.push_str(&token.to_string());
-                return;
-            }
-        }
-
-        let node = self.create_node(&self.current_token, HTML_NAMESPACE);
-        let parent_id = current_node!(self).id;
-        self.document.get_mut().add_node(node, parent_id);
     }
 
     fn display_debug_info(&self) {
