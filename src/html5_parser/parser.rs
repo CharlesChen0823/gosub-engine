@@ -276,10 +276,10 @@ impl<'stream> Html5Parser<'stream> {
                 break;
             }
 
-            println!(
-                "Token: {}, self.insertion_mode {:?}",
-                self.current_token, self.insertion_mode
-            );
+            // println!(
+            //     "Token: {}, self.insertion_mode {:?}",
+            //     self.current_token, self.insertion_mode
+            // );
 
             match self.insertion_mode {
                 // Checked: 1
@@ -413,10 +413,7 @@ impl<'stream> Html5Parser<'stream> {
                         }
                         Token::CommentToken { .. } => {
                             let parent_id = current_node!(self).id;
-                            self.insert_comment(
-                                &self.current_token.clone(),
-                                parent_id
-                            );
+                            self.insert_comment(&self.current_token.clone(), parent_id);
                         }
                         Token::DocTypeToken { .. } => {
                             self.parse_error("doctype not allowed in before head insertion mode");
@@ -537,10 +534,7 @@ impl<'stream> Html5Parser<'stream> {
                         }
                         Token::CommentToken { .. } => {
                             let parent_id = current_node!(self).id;
-                            self.insert_comment(
-                                &self.current_token.clone(),
-                                parent_id
-                            );
+                            self.insert_comment(&self.current_token.clone(), parent_id);
                         }
                         Token::DocTypeToken { .. } => {
                             self.parse_error("doctype not allowed in after head insertion mode");
@@ -781,10 +775,7 @@ impl<'stream> Html5Parser<'stream> {
                         }
                         Token::CommentToken { .. } => {
                             let parent_id = current_node!(self).id;
-                            self.insert_comment(
-                                &self.current_token.clone(),
-                                parent_id
-                            );
+                            self.insert_comment(&self.current_token.clone(), parent_id);
                         }
                         Token::DocTypeToken { .. } => {
                             self.parse_error("doctype not allowed in column group insertion mode");
@@ -1314,10 +1305,7 @@ impl<'stream> Html5Parser<'stream> {
                         }
                         Token::CommentToken { .. } => {
                             let parent_id = current_node!(self).id;
-                            self.insert_comment(
-                                &self.current_token.clone(),
-                                parent_id
-                            );
+                            self.insert_comment(&self.current_token.clone(), parent_id);
                         }
                         Token::DocTypeToken { .. } => {
                             self.parse_error("doctype not allowed in frameset insertion mode");
@@ -1380,10 +1368,7 @@ impl<'stream> Html5Parser<'stream> {
                         }
                         Token::CommentToken { .. } => {
                             let parent_id = current_node!(self).id;
-                            self.insert_comment(
-                                &self.current_token.clone(),
-                                parent_id
-                            );
+                            self.insert_comment(&self.current_token.clone(), parent_id);
                         }
                         Token::DocTypeToken { .. } => {
                             self.parse_error("doctype not allowed in frameset insertion mode");
@@ -2178,8 +2163,7 @@ impl<'stream> Html5Parser<'stream> {
 
                 for idx in (0..self.open_elements.len()).rev() {
                     let node_id = self.open_elements[idx];
-                    let node = get_node_by_id!(self, node_id)
-                        .clone();
+                    let node = get_node_by_id!(self, node_id).clone();
 
                     if node.name == name.as_str() {
                         self.generate_all_implied_end_tags(Some(name.as_str()), false);
@@ -3816,34 +3800,16 @@ impl<'stream> Html5Parser<'stream> {
             None => &current_node,
         };
 
-        let adjusted_insertion_location = target.id;
+         let adjusted_node_location = if self.foster_parenting
+             && ["table", "tbody", "thead", "tfoot", "tr"].contains(&target.name.as_str())
+         {
+            self.find_adopation_insertion_location()
+        } else {
+            // TODO
+             target.id
+         };
 
-        //     && ["table", "tbody", "thead", "tfoot", "tr"].contains(&target.name.as_str())
-        // {
-        //     /*
-        //     @todo!()
-        //
-        //     Run these substeps:
-        //
-        //         Let last template be the last template element in the stack of open elements, if any.
-        //
-        //         Let last table be the last table element in the stack of open elements, if any.
-        //
-        //         If there is a last template and either there is no last table, or there is one, but last template is lower (more recently added) than last table in the stack of open elements, then: let adjusted insertion location be inside last template's template contents, after its last child (if any), and abort these steps.
-        //
-        //         If there is no last table, then let adjusted insertion location be inside the first element in the stack of open elements (the html element), after its last child (if any), and abort these steps. (fragment case)
-        //
-        //         If last table has a parent node, then let adjusted insertion location be inside last table's parent node, immediately before last table, and abort these steps.
-        //
-        //         Let previous element be the element immediately above last table in the stack of open elements.
-        //
-        //         Let adjusted insertion location be inside previous element, after its last child (if any).
-        //      */
-        //
-        //     adjusted_insertion_location = target.id
-        // }
-
-        let node = get_node_by_id!(self, adjusted_insertion_location);
+        let node = get_node_by_id!(self, adjusted_node_location);
         if node.parent.is_some() {
             let node = get_node_by_id!(self, node.parent.unwrap());
             if node.name == "template" {
@@ -3852,7 +3818,44 @@ impl<'stream> Html5Parser<'stream> {
             }
         }
 
-        adjusted_insertion_location
+        adjusted_node_location
+    }
+
+    fn find_adopation_insertion_location(&self) -> NodeId {
+        let mut last_template = None;
+        let mut last_table = None;
+        let mut last_template_idx = 0;
+        let mut last_table_idx = 0;
+        for id in self.open_elements.iter().rev() {
+            last_template_idx += 1;
+            let current = get_node_by_id!(self, *id);
+            if current.name == "template" {
+                last_template = Some(*id);
+                break;
+            }
+        }
+        for id in self.open_elements.iter().rev() {
+            last_table_idx += 1;
+            let current = get_node_by_id!(self, *id);
+            if current.name == "table" {
+                last_table = Some(*id);
+                break;
+            }
+        }
+        if (last_template.is_some() && last_table.is_none())
+            || (last_template.is_some()
+                && last_table.is_some()
+                && last_template_idx < last_table_idx)
+        {
+            return last_template.unwrap();
+        }
+        if last_table.is_none() {
+            let first_node = self.open_elements[0];
+            return first_node;
+        } else {
+            let current = self.open_elements[self.open_elements.len() - 1 - last_table_idx - 1];
+            return current;
+        }
     }
 
     /// Merges the text with the last child of the current node if that is also a text node
