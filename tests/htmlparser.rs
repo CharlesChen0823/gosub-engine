@@ -108,11 +108,11 @@ fn run_tree_test(test: &Test) {
     is.read_from_str(test.data.as_str(), None);
 
     let mut parser = Html5Parser::new(&mut is);
-    println!("-----test-----{:?}", test.data);
-    let (document, parse_errors) = parser.parse().unwrap();
+    let document = Document::shared();
+    let parse_errors = parser.parse(Document::clone(&document)).unwrap();
 
     // Check the document tree, which counts as a single assertion
-    match_document_tree(document, &test.document);
+    match_document_tree(&document.get(), &test.document);
 
     // assert_eq!(parse_errors.len(), test.errors.len());
 
