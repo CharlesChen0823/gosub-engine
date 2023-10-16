@@ -1570,25 +1570,14 @@ impl<'stream> Html5Parser<'stream> {
                         .as_str(),
                 );
                 if pub_identifier.is_some() || sys_identifier.is_some() {
-                    if !*force_quirks {
-                        val.push_str(
-                            format!(
-                                " \"{}\" \"{}\"",
-                                pub_identifier.as_deref().unwrap_or(""),
-                                sys_identifier.as_deref().unwrap_or("")
-                            )
-                            .as_str(),
-                        );
-                    } else {
-                        val.push_str(
-                            format!(
-                                " {} {}",
-                                pub_identifier.as_deref().unwrap_or(""),
-                                sys_identifier.as_deref().unwrap_or("")
-                            )
-                            .as_str(),
-                        );
-                    }
+                    val.push_str(
+                        format!(
+                            " \"{}\" \"{}\"",
+                            pub_identifier.as_deref().unwrap_or(""),
+                            sys_identifier.as_deref().unwrap_or("")
+                        )
+                        .as_str(),
+                    );
                 }
 
                 return Node::new_element(&self.document, val.as_str(), HashMap::new(), namespace);
@@ -3823,25 +3812,19 @@ impl<'stream> Html5Parser<'stream> {
             None => &current_node,
         };
 
-        let adjusted_node_location = if self.foster_parenting
-            && ["table", "tbody", "thead", "tfoot", "tr"].contains(&target.name.as_str())
+        if !(self.foster_parenting
+            && ["table", "tbody", "thead", "tfoot", "tr"].contains(&target.name.as_str()))
         {
-            self.find_adopation_insertion_location()
-        } else {
-            // TODO
-            target.id
-        };
-
-        let node = get_node_by_id!(self, adjusted_node_location);
-        if node.parent.is_some() {
-            let node = get_node_by_id!(self, node.parent.unwrap());
+            let node = get_node_by_id!(self, target.id);
             if node.name == "template" {
-                // Store in the document fragment
-                // be the content
+                // store in the document fragment be the content
+                return target.id;
+            } else {
+                return target.id;
             }
         }
 
-        adjusted_node_location
+        self.find_adopation_insertion_location()
     }
 
     fn find_adopation_insertion_location(&self) -> NodeId {
