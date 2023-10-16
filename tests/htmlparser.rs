@@ -135,7 +135,7 @@ fn run_tree_test(test: &Test) {
             line: err.line as i64,
             col: err.col as i64,
         };
-        match_error(&got_error, &error);
+        match_error(&got_error, error);
         idx += 1;
     }
 }

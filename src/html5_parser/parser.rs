@@ -16,7 +16,7 @@ use crate::html5_parser::parser::adoption_agency::AdoptionResult;
 use crate::html5_parser::parser::attr_replacements::{
     MATHML_ADJUSTMENTS, SVG_ADJUSTMENTS_ATTRIBUTES, SVG_ADJUSTMENTS_TAG, XML_ADJUSTMENTS,
 };
-use crate::html5_parser::parser::document::{Document, DocumentFragment, DocumentType};
+use crate::html5_parser::parser::document::{Document, DocumentType};
 use crate::html5_parser::parser::quirks::QuirksMode;
 use crate::html5_parser::tokenizer::state::State;
 use crate::html5_parser::tokenizer::token::Token;
@@ -1560,7 +1560,7 @@ impl<'stream> Html5Parser<'stream> {
                 name,
                 pub_identifier,
                 sys_identifier,
-                force_quirks,
+                force_quirks: _,
             } => {
                 let mut val = String::from("!DOCTYPE ");
                 val.push_str(
@@ -2886,7 +2886,7 @@ impl<'stream> Html5Parser<'stream> {
                 anything_else = true;
             }
             Token::StartTagToken { name, .. } if name == "template" => {
-                let node_id = self.insert_html_element(&self.current_token.clone());
+                let _node_id = self.insert_html_element(&self.current_token.clone());
 
                 // {
                 //     let current_node_id = current_node!(self).id;
@@ -3856,11 +3856,11 @@ impl<'stream> Html5Parser<'stream> {
             return last_template.unwrap();
         }
         if last_table.is_none() {
-            let first_node = self.open_elements[0];
-            return first_node;
+            
+            self.open_elements[0]
         } else {
-            let current = self.open_elements[self.open_elements.len() - 1 - last_table_idx - 1];
-            return current;
+            
+            self.open_elements[self.open_elements.len() - 1 - last_table_idx - 1]
         }
     }
 
