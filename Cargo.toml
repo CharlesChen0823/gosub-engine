@@ -15,8 +15,8 @@ name = "tokenizer"
 path = "tests/tokenizer.rs"
 
 [[test]]
-name = "htmlparser"
-path = "tests/htmlparser.rs"
+name = "tree_construction"
+path = "tests/tree_construction.rs"
 
 [[bench]]
 name = "tokenizer"
