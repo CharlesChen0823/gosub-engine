@@ -214,6 +214,8 @@ pub struct Html5Parser<'stream> {
     active_formatting_elements: Vec<ActiveElement>,
     /// Is the current parsing a fragment case
     is_fragment_case: bool,
+    /// The context element for the fragment parsing algorithm
+    context_elem: Option<NodeId>,
     /// A reference to the document we are parsing
     document: DocumentHandle,
     /// Error logger, which is shared with the tokenizer
@@ -262,6 +264,7 @@ impl<'stream> Html5Parser<'stream> {
             ack_self_closing: false,
             active_formatting_elements: vec![],
             is_fragment_case: false,
+            context_elem: None,
             document,
             error_logger,
         }
@@ -1462,6 +1465,92 @@ impl<'stream> Html5Parser<'stream> {
         }
 
         Ok(self.error_logger.borrow().get_errors().clone())
+    }
+
+    fn is_fragment_case(&mut self) -> bool {
+        self.context_elem.is_some()
+    }
+
+    fn adjusted_current_node(&self) -> &NodeId {
+        if self.open_elements.len() == 1 {
+            if let Some(ctx) = self.context_elem.as_ref() {
+                return ctx;
+            }
+        }
+        self.open_elements.last().expect("node not found")
+    }
+
+    fn mathml_text_integration_point(&self, node: &Node) -> bool {
+        if node.namespace != Some(MATHML_NAMESPACE.into()) {
+            return false;
+        }
+        if !["mi", "mo", "mn", "ms", "mtext"].contains(&node.name.as_str()) {
+            return false;
+        }
+        true
+    }
+
+    fn svg_html_integration_point(&self, node: &Node) -> bool {
+        if node.namespace != Some(SVG_NAMESPACE.into()) {
+            return false;
+        }
+
+        if !["foreignObject", "desc", "title"].contains(&node.name.as_str()) {
+            return false;
+        }
+        true
+    }
+
+    fn is_foreign(&self, token: &Token) -> bool {
+        if let Token::EofToken = *token {
+            return false;
+        }
+
+        if self.open_elements.is_empty() {
+            return false;
+        }
+
+        let node_id = self.adjusted_current_node();
+        let node = self.document.get().get_node_by_id(*node_id).expect("node not found").clone();
+        if node.namespace == Some(HTML_NAMESPACE.into()) {
+            return false;
+        }
+
+        if self.mathml_text_integration_point(&node) {
+            if let Token::StartTagToken { ref name, .. } = *token {
+                if name == "mglyph" || name == "malignmark" {
+                    return false;
+                }
+            }
+            if let Token::TextToken { .. } = *token {
+                return false;
+            }
+        }
+
+        if self.svg_html_integration_point(&node) {
+            if let Token::TextToken { .. } = *token {
+                return false;
+            }
+            if let Token::StartTagToken { .. } = *token {
+                return false;
+            }
+        }
+
+        if node.namespace == Some(MATHML_NAMESPACE.into()) && node.name == "annotation-xml"
+        {
+            if let Token::StartTagToken { ref name, .. } = *token {
+                if name == "svg" {
+                    return false;
+                }
+                return !self.mathml_text_integration_point(&node)
+            }
+            if let Token::TextToken { .. } = *token {
+                return !self.mathml_text_integration_point(&node)
+            }
+
+        }
+
+        true
     }
 
     fn acknowledge_closing_tag(&mut self, is_self_closing: bool) {
@@ -2677,7 +2766,6 @@ impl<'stream> Html5Parser<'stream> {
 
                 self.reconstruct_formatting();
                 self.insert_html_element(&self.current_token.clone());
-
             }
             Token::StartTagToken { name, .. } if name == "rb" || name == "rtc" => {
                 if self.is_in_scope("ruby", Scope::Regular) {
