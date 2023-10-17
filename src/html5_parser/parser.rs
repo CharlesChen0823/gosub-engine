@@ -1467,7 +1467,7 @@ impl<'stream> Html5Parser<'stream> {
         Ok(self.error_logger.borrow().get_errors().clone())
     }
 
-    fn is_fragment_case(&mut self) -> bool {
+    fn is_fragment(&self) -> bool {
         self.context_elem.is_some()
     }
 
