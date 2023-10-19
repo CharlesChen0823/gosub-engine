@@ -136,6 +136,7 @@ macro_rules! open_elements_get {
 
 #[macro_use]
 mod adoption_agency;
+mod helper;
 
 /// Insert location for a new node
 pub struct NodeInsertLocation {
