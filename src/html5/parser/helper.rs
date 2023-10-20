@@ -71,9 +71,26 @@ impl<'stream> Html5Parser<'stream> {
             .map(|(i, x)| (i, x.clone()))
     }
 
-    fn in_body_any_other_end_tag(&self, token: &Token) {}
-
-    fn insert_element(&self, node: NodeId, postion: InsertionPositionMode<NodeId>) {}
+    fn insert_element(&mut self, node: NodeId, override_node: Option<NodeId>) {
+        let insertion_postion = self.appropriate_place_insert(override_node);
+        match insertion_postion {
+            InsertionPositionMode::Sibling { parent, before } => {
+                self.document.detach_node_from_parent(node);
+                let parent_node = self.get_node_id(&parent).clone();
+                let position = parent_node
+                    .children
+                    .iter()
+                    .position(|&x| x == before)
+                    .unwrap();
+                self.document
+                    .attach_node_to_parent(node, parent, Some(position - 1));
+            }
+            InsertionPositionMode::LastChild(parent) => {
+                self.document.detach_node_from_parent(node);
+                self.document.attach_node_to_parent(node, parent, None);
+            }
+        }
+    }
 
     fn swap_parent(&mut self, node: Node, parent: NodeId) -> NodeId {
         let node_id = self.document.get_mut().add_node(node, parent, None);
@@ -155,7 +172,7 @@ impl<'stream> Html5Parser<'stream> {
             // step 4.3
             let (format_elem_idx, format_elem_node_id) = match self.find_format_element(subject) {
                 None => {
-                    return self.in_body_any_other_end_tag(token);
+                    return self.handle_in_body_any_other_end_tag();
                 }
                 Some((idx, node_id)) => (idx, node_id.clone()),
             };
@@ -281,8 +298,7 @@ impl<'stream> Html5Parser<'stream> {
             }
 
             // step 4.14
-            let insertion_postion = self.appropriate_place_insert(Some(common_ancestor));
-            self.insert_element(last_node_id, insertion_postion);
+            self.insert_element(last_node_id, Some(common_ancestor));
 
             // step 4.15
             let new_format_node: Node = Node::new_element(
