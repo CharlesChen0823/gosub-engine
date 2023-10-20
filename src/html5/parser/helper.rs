@@ -77,21 +77,50 @@ impl<'stream> Html5Parser<'stream> {
 
     fn swap_parent(&mut self, node: Node, parent: NodeId) -> NodeId {
         let node_id = self.document.get_mut().add_node(node, parent, None);
-        let parent_node = self.document.get().get_node_by_id(parent).expect("node not found").clone();
+        let parent_node = self
+            .document
+            .get()
+            .get_node_by_id(parent)
+            .expect("node not found")
+            .clone();
         for child in parent_node.children.iter() {
             if child == &node_id {
                 continue;
             }
             self.document.get_mut().relocate(*child, node_id);
         }
-        return node_id
+        return node_id;
     }
 
     fn appropriate_place_insert(
         &self,
         override_node: Option<NodeId>,
     ) -> InsertionPositionMode<NodeId> {
-        InsertionPositionMode::LastChild(0.into())
+        let current_node_id = self.current_node_id();
+        let target_id = override_node.unwrap_or(*current_node_id);
+        let target_node = self.get_node_id(&target_id).clone();
+        if !(self.foster_parenting && [].contains(&target_node.name.as_str())) {
+            if target_node.name == "template" {
+                panic!("current not support");
+            } else {
+                return InsertionPositionMode::LastChild(target_id);
+            }
+        }
+        let mut iter = self.open_elements.iter().rev().peekable();
+        while let Some(node_id) = iter.next() {
+            let node = self.get_node_id(node_id);
+            if node.name == "template" {
+                panic!("current not support");
+            } else if node.name == "table" {
+                if node.parent.is_some() {
+                    return InsertionPositionMode::Sibling {
+                        parent: node.parent.unwrap(),
+                        before: node_id.clone(),
+                    };
+                }
+            }
+        }
+        return InsertionPositionMode::LastChild(*self.open_elements.first().unwrap());
     }
 
     fn adoption_agency_algorithm(&mut self, token: &Token) {
@@ -218,8 +247,12 @@ impl<'stream> Html5Parser<'stream> {
                     NodeData::Element(element) => element.attributes.clone_map(),
                     _ => HashMap::new(),
                 };
-                let replacement_node =
-                    Node::new_element(&self.document, &element.name, node_attributes, HTML_NAMESPACE);
+                let replacement_node = Node::new_element(
+                    &self.document,
+                    &element.name,
+                    node_attributes,
+                    HTML_NAMESPACE,
+                );
                 let replace_node_id =
                     self.document
                         .get_mut()
@@ -252,8 +285,12 @@ impl<'stream> Html5Parser<'stream> {
             self.insert_element(last_node_id, insertion_postion);
 
             // step 4.15
-            let new_format_node: Node =
-                Node::new_element(&self.document, &format_elem_node.name, HashMap::new(), HTML_NAMESPACE);
+            let new_format_node: Node = Node::new_element(
+                &self.document,
+                &format_elem_node.name,
+                HashMap::new(),
+                HTML_NAMESPACE,
+            );
 
             // step 4.16, 17
             let new_format_node_id = self.swap_parent(new_format_node, further_block_node_id);
