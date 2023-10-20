@@ -208,6 +208,7 @@ impl<'stream> Html5Parser<'stream> {
                         before: node_id.clone(),
                     };
                 }
+                return InsertionPositionMode::LastChild((*iter.peek().unwrap()).clone());
             }
         }
         return InsertionPositionMode::LastChild(*self.open_elements.first().unwrap());
