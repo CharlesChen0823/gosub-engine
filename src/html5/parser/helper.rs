@@ -15,9 +15,7 @@ pub enum InsertionPositionMode<NodeId> {
 
 impl<'stream> Html5Parser<'stream> {
     fn current_node_id(&self) -> &NodeId {
-        self.open_elements
-            .last()
-            .unwrap_or_default()
+        self.open_elements.last().unwrap_or_default()
     }
 
     fn current_node(&self) -> Node {
@@ -94,10 +92,11 @@ impl<'stream> Html5Parser<'stream> {
                     self.document
                         .attach_node_to_parent(node, parent, Some(position - 1));
                 } else {
-                    self.document.detach_node_from_parent(node);
+                    // self.document.detach_node_from_parent(node);
                     let parent_node = self.get_node_id(&parent).clone();
                     let position = parent_node.children.iter().position(|&x| x == before);
                     if position.is_some() {
+                        self.document.detach_node_from_parent(node);
                         let last_node_id = parent_node.children[position.unwrap()];
                         let mut doc = self.document.get_mut();
                         let last_node = doc
@@ -117,9 +116,10 @@ impl<'stream> Html5Parser<'stream> {
                     self.document.detach_node_from_parent(node);
                     self.document.attach_node_to_parent(node, parent, None);
                 } else {
-                    self.document.detach_node_from_parent(node);
+                    // self.document.detach_node_from_parent(node);
                     let parent_node = self.get_node_id(&parent).clone();
                     if let Some(last_node_id) = parent_node.children.last() {
+                        self.document.detach_node_from_parent(node);
                         let mut doc = self.document.get_mut();
                         let last_node = doc
                             .get_node_by_id_mut(*last_node_id)
@@ -129,7 +129,7 @@ impl<'stream> Html5Parser<'stream> {
                             return;
                         }
                     }
-                    // self.document.detach_node_from_parent(node);
+                    self.document.detach_node_from_parent(node);
                     self.document.attach_node_to_parent(node, parent, None);
                 }
             }
@@ -137,7 +137,6 @@ impl<'stream> Html5Parser<'stream> {
     }
 
     pub fn insert_nontext_element(&mut self, mut node: Node) -> NodeId {
-
         if let NodeData::Element(ref mut element) = node.data {
             if element.attributes.contains("class") {
                 if let Some(class_string) = element.attributes.get("class") {
@@ -151,7 +150,6 @@ impl<'stream> Html5Parser<'stream> {
         let insertion_position = self.appropriate_place_insert(None);
         self.insert_helper(node_id, insertion_position, false, None);
         return node_id;
-
     }
 
     pub fn insert_text_element(&mut self, token: &Token) {
