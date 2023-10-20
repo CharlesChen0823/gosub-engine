@@ -1,3 +1,5 @@
+use crate::html5::element_class::ElementClass;
+use crate::html5::node::data::text::TextData;
 use crate::html5::node::{Node, NodeData, NodeId, HTML_NAMESPACE};
 use crate::html5::parser::{ActiveElement, Html5Parser, Scope};
 use crate::html5::tokenizer::token::Token;
@@ -15,7 +17,7 @@ impl<'stream> Html5Parser<'stream> {
     fn current_node_id(&self) -> &NodeId {
         self.open_elements
             .last()
-            .expect("current_node_id not found")
+            .unwrap_or_default()
     }
 
     fn current_node(&self) -> Node {
@@ -71,25 +73,98 @@ impl<'stream> Html5Parser<'stream> {
             .map(|(i, x)| (i, x.clone()))
     }
 
-    fn insert_element(&mut self, node: NodeId, override_node: Option<NodeId>) {
-        let insertion_postion = self.appropriate_place_insert(override_node);
-        match insertion_postion {
+    /// node_type true is for text node, false if other
+    fn insert_helper(
+        &mut self,
+        node: NodeId,
+        position: InsertionPositionMode<NodeId>,
+        node_type: bool,
+        token: Option<&Token>,
+    ) {
+        match position {
             InsertionPositionMode::Sibling { parent, before } => {
-                self.document.detach_node_from_parent(node);
-                let parent_node = self.get_node_id(&parent).clone();
-                let position = parent_node
-                    .children
-                    .iter()
-                    .position(|&x| x == before)
-                    .unwrap();
-                self.document
-                    .attach_node_to_parent(node, parent, Some(position - 1));
+                if !node_type {
+                    self.document.detach_node_from_parent(node);
+                    let parent_node = self.get_node_id(&parent).clone();
+                    let position = parent_node
+                        .children
+                        .iter()
+                        .position(|&x| x == before)
+                        .unwrap();
+                    self.document
+                        .attach_node_to_parent(node, parent, Some(position - 1));
+                } else {
+                    self.document.detach_node_from_parent(node);
+                    let parent_node = self.get_node_id(&parent).clone();
+                    let position = parent_node.children.iter().position(|&x| x == before);
+                    if position.is_some() {
+                        let last_node_id = parent_node.children[position.unwrap()];
+                        let mut doc = self.document.get_mut();
+                        let last_node = doc
+                            .get_node_by_id_mut(last_node_id)
+                            .expect("node not found");
+                        if let NodeData::Text(TextData { ref mut value, .. }) = last_node.data {
+                            value.push_str(&token.unwrap().to_string());
+                            return;
+                        }
+                    }
+                    // self.document.detach_node_from_parent(node);
+                    self.document.attach_node_to_parent(node, parent, position);
+                }
             }
             InsertionPositionMode::LastChild(parent) => {
-                self.document.detach_node_from_parent(node);
-                self.document.attach_node_to_parent(node, parent, None);
+                if !node_type {
+                    self.document.detach_node_from_parent(node);
+                    self.document.attach_node_to_parent(node, parent, None);
+                } else {
+                    self.document.detach_node_from_parent(node);
+                    let parent_node = self.get_node_id(&parent).clone();
+                    if let Some(last_node_id) = parent_node.children.last() {
+                        let mut doc = self.document.get_mut();
+                        let last_node = doc
+                            .get_node_by_id_mut(*last_node_id)
+                            .expect("node not found");
+                        if let NodeData::Text(TextData { ref mut value, .. }) = last_node.data {
+                            value.push_str(&token.unwrap().to_string());
+                            return;
+                        }
+                    }
+                    // self.document.detach_node_from_parent(node);
+                    self.document.attach_node_to_parent(node, parent, None);
+                }
             }
         }
+    }
+
+    pub fn insert_nontext_element(&mut self, mut node: Node) -> NodeId {
+
+        if let NodeData::Element(ref mut element) = node.data {
+            if element.attributes.contains("class") {
+                if let Some(class_string) = element.attributes.get("class") {
+                    element.classes = ElementClass::from_string(class_string);
+                }
+            }
+        }
+
+        let current_node_id = self.current_node_id().clone();
+        let node_id = self.document.add_node(node, current_node_id, None);
+        let insertion_position = self.appropriate_place_insert(None);
+        self.insert_helper(node_id, insertion_position, false, None);
+        return node_id;
+
+    }
+
+    pub fn insert_text_element(&mut self, token: &Token) {
+        let node = self.create_node(token, HTML_NAMESPACE);
+        let current_node_id = self.current_node_id().clone();
+        let node_id = self.document.add_node(node, current_node_id, None);
+        let insertion_position = self.appropriate_place_insert(None);
+        self.insert_helper(node_id, insertion_position, true, Some(token));
+    }
+
+    fn insert_element(&mut self, node: NodeId, override_node: Option<NodeId>) {
+        let insertion_position = self.appropriate_place_insert(override_node);
+        self.insert_helper(node, insertion_position, false, None);
     }
 
     fn swap_parent(&mut self, node: Node, parent: NodeId) -> NodeId {
