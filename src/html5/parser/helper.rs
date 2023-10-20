@@ -90,24 +90,26 @@ impl<'stream> Html5Parser<'stream> {
                         .position(|&x| x == before)
                         .unwrap();
                     self.document
-                        .attach_node_to_parent(node, parent, Some(position - 1));
+                        .attach_node_to_parent(node, parent, Some(position));
                 } else {
-                    // self.document.detach_node_from_parent(node);
+                    self.document.detach_node_from_parent(node);
                     let parent_node = self.get_node_id(&parent).clone();
                     let position = parent_node.children.iter().position(|&x| x == before);
                     if position.is_some() {
-                        self.document.detach_node_from_parent(node);
                         let last_node_id = parent_node.children[position.unwrap()];
-                        let mut doc = self.document.get_mut();
-                        let last_node = doc
+                        if let NodeData::Text(TextData { ref mut value, .. }) = self
+                            .document
+                            .get_mut()
                             .get_node_by_id_mut(last_node_id)
-                            .expect("node not found");
-                        if let NodeData::Text(TextData { ref mut value, .. }) = last_node.data {
+                            .expect("node not found")
+                            .data
+                        {
                             value.push_str(&token.unwrap().to_string());
                             return;
-                        }
+                        };
+                        self.document.attach_node_to_parent(node, parent, position);
+                        return;
                     }
-                    // self.document.detach_node_from_parent(node);
                     self.document.attach_node_to_parent(node, parent, position);
                 }
             }
@@ -116,20 +118,22 @@ impl<'stream> Html5Parser<'stream> {
                     self.document.detach_node_from_parent(node);
                     self.document.attach_node_to_parent(node, parent, None);
                 } else {
-                    // self.document.detach_node_from_parent(node);
+                    self.document.detach_node_from_parent(node);
                     let parent_node = self.get_node_id(&parent).clone();
                     if let Some(last_node_id) = parent_node.children.last() {
-                        self.document.detach_node_from_parent(node);
-                        let mut doc = self.document.get_mut();
-                        let last_node = doc
+                        if let NodeData::Text(TextData { ref mut value, .. }) = self
+                            .document
+                            .get_mut()
                             .get_node_by_id_mut(*last_node_id)
-                            .expect("node not found");
-                        if let NodeData::Text(TextData { ref mut value, .. }) = last_node.data {
+                            .expect("node not found")
+                            .data
+                        {
                             value.push_str(&token.unwrap().to_string());
                             return;
-                        }
+                        };
+                        self.document.attach_node_to_parent(node, parent, None);
+                        return;
                     }
-                    self.document.detach_node_from_parent(node);
                     self.document.attach_node_to_parent(node, parent, None);
                 }
             }
@@ -189,7 +193,9 @@ impl<'stream> Html5Parser<'stream> {
         let current_node_id = self.current_node_id();
         let target_id = override_node.unwrap_or(*current_node_id);
         let target_node = self.get_node_id(&target_id).clone();
-        if !(self.foster_parenting && [].contains(&target_node.name.as_str())) {
+        if !(self.foster_parenting
+            && ["table", "tbody", "thead", "tfoot", "tr"].contains(&target_node.name.as_str()))
+        {
             if target_node.name == "template" {
                 panic!("current not support");
             } else {
