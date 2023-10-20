@@ -73,11 +73,19 @@ impl<'stream> Html5Parser<'stream> {
 
     fn in_body_any_other_end_tag(&self, token: &Token) {}
 
-    fn reparent(&mut self, parent_id: NodeId, child: NodeId) {}
-
     fn insert_element(&self, node: NodeId, postion: InsertionPositionMode<NodeId>) {}
 
-    fn swap_parent(&mut self, parent_id: NodeId, old_parent: NodeId) {}
+    fn swap_parent(&mut self, node: Node, parent: NodeId) -> NodeId {
+        let node_id = self.document.get_mut().add_node(node, parent, None);
+        let parent_node = self.document.get().get_node_by_id(parent).expect("node not found").clone();
+        for child in parent_node.children.iter() {
+            if child == &node_id {
+                continue;
+            }
+            self.document.get_mut().relocate(*child, node_id);
+        }
+        return node_id
+    }
 
     fn appropriate_place_insert(
         &self,
@@ -211,7 +219,7 @@ impl<'stream> Html5Parser<'stream> {
                     _ => HashMap::new(),
                 };
                 let replacement_node =
-                    Node::new_element(&self.document, &subject, node_attributes, HTML_NAMESPACE);
+                    Node::new_element(&self.document, &element.name, node_attributes, HTML_NAMESPACE);
                 let replace_node_id =
                     self.document
                         .get_mut()
@@ -233,7 +241,7 @@ impl<'stream> Html5Parser<'stream> {
                 }
 
                 // step 4.13.8
-                self.reparent(node_id, last_node_id);
+                self.document.relocate(node_id, last_node_id);
 
                 // step 4.13.9
                 node_id = last_node_id;
@@ -245,16 +253,10 @@ impl<'stream> Html5Parser<'stream> {
 
             // step 4.15
             let new_format_node: Node =
-                Node::new_element(&self.document, &subject, HashMap::new(), HTML_NAMESPACE);
-            let new_format_node_id: NodeId = 0.into();
+                Node::new_element(&self.document, &format_elem_node.name, HashMap::new(), HTML_NAMESPACE);
 
-            // step 4.16
-            self.swap_parent(new_format_node_id, further_block_node_id);
-
-            // step 4.17
-            self.document
-                .get_mut()
-                .add_node(new_format_node, further_block_node_id, None);
+            // step 4.16, 17
+            let new_format_node_id = self.swap_parent(new_format_node, further_block_node_id);
 
             // step 4.18
             let position = self.position_in_active_format(&new_format_node_id).unwrap();
