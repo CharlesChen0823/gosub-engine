@@ -82,7 +82,6 @@ impl<'stream> Html5Parser<'stream> {
         match position {
             InsertionPositionMode::Sibling { parent, before } => {
                 if !node_type {
-                    self.document.detach_node_from_parent(node);
                     let parent_node = self.get_node_id(&parent).clone();
                     let position = parent_node
                         .children
@@ -114,7 +113,6 @@ impl<'stream> Html5Parser<'stream> {
             }
             InsertionPositionMode::LastChild(parent) => {
                 if !node_type {
-                    self.document.detach_node_from_parent(node);
                     self.document.attach_node_to_parent(node, parent, None);
                 } else {
                     let parent_node = self.get_node_id(&parent).clone();
@@ -138,7 +136,14 @@ impl<'stream> Html5Parser<'stream> {
         }
     }
 
-    pub fn insert_nontext_element(&mut self, mut node: Node) -> NodeId {
+    pub fn insert_node_element(&mut self, token: &Token, override_node: Option<NodeId>, namespace: Option<&str>) -> NodeId {
+        let mut node = self.create_node(token, namespace.unwrap_or(HTML_NAMESPACE));
+        // add CSS classes from class attribute in element
+        // e.g., <div class="one two three">
+        // TODO: this will be refactored later in ElementAttributes to do this
+        // when inserting a "class" attribute. Similar to "id" to attach it to the DOM
+        // named_id_list. Although this will require some shared pointers
+
         if let NodeData::Element(ref mut element) = node.data {
             if element.attributes.contains("class") {
                 if let Some(class_string) = element.attributes.get("class") {
@@ -147,17 +152,17 @@ impl<'stream> Html5Parser<'stream> {
             }
         }
 
-        let current_node_id = self.current_node_id().clone();
-        let node_id = self.document.add_node(node, current_node_id, None);
-        let insertion_position = self.appropriate_place_insert(None);
-        self.insert_helper(node_id, insertion_position, false, None);
-        return node_id;
-    }
+        let node_id = self.document.get_mut().add_new_node(node);
+        let insert_position = self.appropriate_place_insert(override_node);
+        self.insert_helper(node_id, insert_position, false, Some(token));
 
-    pub fn insert_element_node_bk(&mut self, mut node: Node) -> NodeId {
-        let node_id = self.insert_nontext_element(node);
+        //     if parser not created as part of html fragment parsing algorithm
+        //       pop the top element queue from the relevant agent custom element reactions stack (???)
 
+        // push element onto the stack of open elements so that is the new current node
         self.open_elements.push(node_id);
+
+        // return element
         node_id
     }
 
