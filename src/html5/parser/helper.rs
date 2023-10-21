@@ -92,7 +92,6 @@ impl<'stream> Html5Parser<'stream> {
                     self.document
                         .attach_node_to_parent(node, parent, Some(position));
                 } else {
-                    self.document.detach_node_from_parent(node);
                     let parent_node = self.get_node_id(&parent).clone();
                     let position = parent_node.children.iter().position(|&x| x == before);
                     if position.is_some() {
@@ -118,7 +117,6 @@ impl<'stream> Html5Parser<'stream> {
                     self.document.detach_node_from_parent(node);
                     self.document.attach_node_to_parent(node, parent, None);
                 } else {
-                    self.document.detach_node_from_parent(node);
                     let parent_node = self.get_node_id(&parent).clone();
                     if let Some(last_node_id) = parent_node.children.last() {
                         if let NodeData::Text(TextData { ref mut value, .. }) = self
@@ -156,10 +154,16 @@ impl<'stream> Html5Parser<'stream> {
         return node_id;
     }
 
+    pub fn insert_element_node_bk(&mut self, mut node: Node) -> NodeId {
+        let node_id = self.insert_nontext_element(node);
+
+        self.open_elements.push(node_id);
+        node_id
+    }
+
     pub fn insert_text_element(&mut self, token: &Token) {
         let node = self.create_node(token, HTML_NAMESPACE);
-        let current_node_id = self.current_node_id().clone();
-        let node_id = self.document.add_node(node, current_node_id, None);
+        let node_id = self.document.get_mut().add_new_node(node);
         let insertion_position = self.appropriate_place_insert(None);
         self.insert_helper(node_id, insertion_position, true, Some(token));
     }
