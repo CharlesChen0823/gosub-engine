@@ -683,11 +683,13 @@ impl<'stream> Html5Parser<'stream> {
                             }
 
                             if process_as_intable_anything_else {
+                                let tmp = self.current_token.clone();
                                 self.current_token = Token::TextToken { value: tokens };
 
                                 self.foster_parenting = true;
                                 self.handle_in_body();
                                 self.foster_parenting = false;
+                                self.current_token = tmp;
                             } else {
                                 self.insert_text_element(&Token::TextToken { value: tokens });
                             }
