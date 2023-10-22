@@ -19,13 +19,13 @@ pub enum BookMark<NodeId> {
 }
 
 impl<'stream> Html5Parser<'stream> {
-    fn position_in_active_format(&self, node_id: &NodeId) -> Option<usize> {
+    fn find_position_in_active_format(&self, node_id: &NodeId) -> Option<usize> {
         self.active_formatting_elements
             .iter()
             .position(|&x| x == ActiveElement::Node(*node_id))
     }
 
-    fn position_in_open_element(&self, node_id: &NodeId) -> Option<usize> {
+    fn find_position_in_open_element(&self, node_id: &NodeId) -> Option<usize> {
         self.open_elements.iter().position(|x| x == node_id)
     }
 
@@ -251,7 +251,7 @@ impl<'stream> Html5Parser<'stream> {
 
         // step 2
         if current_node.name == *subject
-            && self.position_in_active_format(&current_node_id).is_none()
+            && self.find_position_in_active_format(&current_node_id).is_none()
         {
             self.open_elements.pop();
             return;
@@ -345,13 +345,13 @@ impl<'stream> Html5Parser<'stream> {
 
                 // step 4.13.4
                 if inner_loop_counter > ADOPTION_AGENCY_INNER_LOOP_DEPTH {
-                    self.position_in_active_format(&node_id)
+                    self.find_position_in_active_format(&node_id)
                         .map(|position| self.active_formatting_elements.remove(position));
                     self.open_elements.remove(node_idx);
                     continue;
                 }
                 // step 4.13.5
-                let node_active_position = match self.position_in_active_format(&node_id) {
+                let node_active_position = match self.find_position_in_active_format(&node_id) {
                     Some(pos) => pos,
                     None => {
                         self.open_elements.remove(node_idx);
@@ -426,18 +426,18 @@ impl<'stream> Html5Parser<'stream> {
             match bookmark_node_id {
                 BookMark::Replace(current) => {
                     let index = self
-                        .position_in_active_format(&current)
+                        .find_position_in_active_format(&current)
                         .expect("node not found");
                     self.active_formatting_elements[index] = ActiveElement::Node(new_node_id);
                 }
                 BookMark::InsertAfter(previous) => {
                     let index = self
-                        .position_in_active_format(&previous)
+                        .find_position_in_active_format(&previous)
                         .expect("node not foudn")
                         + 1;
                     self.active_formatting_elements
                         .insert(index, ActiveElement::Node(new_node_id));
-                    let position = self.position_in_active_format(&format_elem_node_id);
+                    let position = self.find_position_in_active_format(&format_elem_node_id);
                     self.active_formatting_elements.remove(position.unwrap());
                 }
             }
@@ -445,7 +445,7 @@ impl<'stream> Html5Parser<'stream> {
             // step 4.19
             self.open_elements.retain(|x| x != &format_elem_node_id);
             let position = self
-                .position_in_open_element(&further_block_node_id)
+                .find_position_in_open_element(&further_block_node_id)
                 .unwrap();
             self.open_elements.insert(position + 1, new_node_id);
         }
