@@ -84,30 +84,26 @@ impl<'stream> Html5Parser<'stream> {
             InsertionPositionMode::Sibling { parent, before } => {
                 let parent_node = get_node_by_id!(self.document, parent);
                 let position = parent_node.children.iter().position(|&x| x == before);
-                if position.is_some() {
-                    let position = position.unwrap();
-                    if position == 0 {
-                        self.document
-                            .attach_node_to_parent(node, parent, Some(position));
-                        return;
+                match position {
+                    None | Some(0) => {
+                        self.document.attach_node_to_parent(node, parent, position);
                     }
-                    // TODO add 1 or not ?
-                    let last_node_id = parent_node.children[position - 1];
-                    if let NodeData::Text(TextData { ref mut value, .. }) = self
-                        .document
-                        .get_mut()
-                        .get_node_by_id_mut(last_node_id)
-                        .expect("node not found")
-                        .data
-                    {
-                        value.push_str(&token.to_string());
-                        return;
-                    };
-                    self.document
-                        .attach_node_to_parent(node, parent, Some(position - 1));
-                    return;
+                    Some(index) => {
+                        let last_node_id = parent_node.children[index - 1];
+                        if let NodeData::Text(TextData { ref mut value, .. }) = self
+                            .document
+                            .get_mut()
+                            .get_node_by_id_mut(last_node_id)
+                            .expect("node not found")
+                            .data
+                        {
+                            value.push_str(&token.to_string());
+                            return;
+                        };
+                        self.document
+                            .attach_node_to_parent(node, parent, Some(index - 1));
+                    }
                 }
-                self.document.attach_node_to_parent(node, parent, position);
             }
             InsertionPositionMode::LastChild(parent) => {
                 let parent_node = get_node_by_id!(self.document, parent);
@@ -161,7 +157,6 @@ impl<'stream> Html5Parser<'stream> {
 
         let node_id = self.document.get_mut().add_new_node(node);
         let insert_position = self.appropriate_place_insert(override_node);
-        // self.insert_helper(node_id, insert_position, false, None);
         self.insert_element_helper(node_id, insert_position);
 
         //     if parser not created as part of html fragment parsing algorithm
@@ -187,14 +182,15 @@ impl<'stream> Html5Parser<'stream> {
 
     pub fn insert_comment_element(&mut self, token: &Token, insert_position: Option<NodeId>) {
         let node = self.create_node(token, HTML_NAMESPACE);
-        if insert_position.is_some() {
-            self.document
-                .get_mut()
-                .add_node(node, insert_position.unwrap(), None);
-        } else {
-            let node_id = self.document.get_mut().add_new_node(node);
-            let insert_position = self.appropriate_place_insert(None);
-            self.insert_element_helper(node_id, insert_position);
+        match insert_position {
+            Some(position) => {
+                self.document.get_mut().add_node(node, position, None);
+            }
+            None => {
+                let node_id = self.document.get_mut().add_new_node(node);
+                let insert_position = self.appropriate_place_insert(None);
+                self.insert_element_helper(node_id, insert_position);
+            }
         }
     }
 
