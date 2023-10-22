@@ -1686,14 +1686,6 @@ impl<'stream> Html5Parser<'stream> {
         }
     }
 
-    /// Get the idx element from the open elements stack
-    fn open_elements_find_index(&self, node_id: NodeId) -> usize {
-        self.open_elements
-            .iter()
-            .position(|&x| x == node_id)
-            .expect("Open element not found")
-    }
-
     /// Returns true when the open elements has $name
     fn open_elements_has(&self, name: &str) -> bool {
         self.open_elements.iter().rev().any(|node_id| {

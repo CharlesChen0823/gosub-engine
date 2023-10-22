@@ -19,27 +19,6 @@ pub enum BookMark<NodeId> {
 }
 
 impl<'stream> Html5Parser<'stream> {
-    fn current_node_id(&self) -> &NodeId {
-        self.open_elements.last().unwrap_or_default()
-    }
-
-    fn current_node(&self) -> Node {
-        let current_node_id = *self.current_node_id();
-        self.document
-            .get()
-            .get_node_by_id(current_node_id)
-            .unwrap()
-            .clone()
-    }
-
-    fn get_node_id(&self, node_id: &NodeId) -> Node {
-        self.document
-            .get()
-            .get_node_by_id(*node_id)
-            .unwrap()
-            .clone()
-    }
-
     fn position_in_active_format(&self, node_id: &NodeId) -> Option<usize> {
         self.active_formatting_elements
             .iter()
@@ -57,7 +36,7 @@ impl<'stream> Html5Parser<'stream> {
             .rev()
             .find_map(|(i, &x)| {
                 if let ActiveElement::Node(node_id) = x {
-                    if self.get_node_id(&node_id).name == subject {
+                    if get_node_by_id!(self.document, node_id).name == subject {
                         Some((i, node_id))
                     } else {
                         None
@@ -74,7 +53,7 @@ impl<'stream> Html5Parser<'stream> {
             .enumerate()
             .skip(format_ele_position)
             .find_map(|(i, &x)| {
-                if self.get_node_id(&x).is_special() {
+                if get_node_by_id!(self.document, x).is_special() {
                     Some((i, x))
                 } else {
                     None
@@ -92,7 +71,7 @@ impl<'stream> Html5Parser<'stream> {
     ) {
         match position {
             InsertionPositionMode::Sibling { parent, before } => {
-                let parent_node = self.get_node_id(&parent).clone();
+                let parent_node = get_node_by_id!(self.document, parent);
                 let position = parent_node.children.iter().position(|&x| x == before);
                 if position.is_none() {
                     panic!("should not reached????????");
@@ -130,7 +109,7 @@ impl<'stream> Html5Parser<'stream> {
                 if !node_type {
                     self.document.attach_node_to_parent(node, parent, None);
                 } else {
-                    let parent_node = self.get_node_id(&parent).clone();
+                    let parent_node = get_node_by_id!(self.document, parent);
                     if let Some(last_node_id) = parent_node.children.last() {
                         if let NodeData::Text(TextData { ref mut value, .. }) = self
                             .document
@@ -230,9 +209,9 @@ impl<'stream> Html5Parser<'stream> {
         &self,
         override_node: Option<NodeId>,
     ) -> InsertionPositionMode<NodeId> {
-        let current_node_id = self.current_node_id();
-        let target_id = override_node.unwrap_or(*current_node_id);
-        let target_node = self.get_node_id(&target_id).clone();
+        let current_node_id = current_node!(self).id;
+        let target_id = override_node.unwrap_or(current_node_id);
+        let target_node = get_node_by_id!(self.document, target_id);
         if !(self.foster_parenting
             && ["table", "tbody", "thead", "tfoot", "tr"].contains(&target_node.name.as_str()))
         {
@@ -244,7 +223,7 @@ impl<'stream> Html5Parser<'stream> {
         }
         let mut iter = self.open_elements.iter().rev().peekable();
         while let Some(node_id) = iter.next() {
-            let node = self.get_node_id(node_id);
+            let node = get_node_by_id!(self.document, *node_id);
             if node.name == "template" {
                 panic!("current not support");
             } else if node.name == "table" {
@@ -267,10 +246,11 @@ impl<'stream> Html5Parser<'stream> {
             Token::StartTagToken { name, .. } | Token::EndTagToken { name, .. } => name,
             _ => panic!("un reached"),
         };
-        let current_node_id = *self.current_node_id();
+        let current_node = current_node!(self);
+        let current_node_id = current_node.id;
 
         // step 2
-        if self.current_node().name == *subject
+        if current_node.name == *subject
             && self.position_in_active_format(&current_node_id).is_none()
         {
             self.open_elements.pop();
@@ -297,7 +277,7 @@ impl<'stream> Html5Parser<'stream> {
                 }
                 Some((idx, node_id)) => (idx, node_id),
             };
-            let format_elem_node = self.get_node_id(&format_elem_node_id);
+            let format_elem_node = get_node_by_id!(self.document, format_elem_node_id);
             let format_ele_stack_position = match self
                 .open_elements
                 .iter()
@@ -380,7 +360,7 @@ impl<'stream> Html5Parser<'stream> {
                 };
 
                 // step 4.13.6
-                let element = self.get_node_id(&node_id);
+                let element = get_node_by_id!(self.document, node_id);
                 let node_attributes = match element.data {
                     NodeData::Element(element) => element.attributes.clone_map(),
                     _ => HashMap::new(),
@@ -432,12 +412,7 @@ impl<'stream> Html5Parser<'stream> {
                 .document
                 .get_mut()
                 .add_new_node(new_format_node.clone());
-            let further_block_node = self
-                .document
-                .get()
-                .get_node_by_id(further_block_node_id)
-                .expect("node not found")
-                .clone();
+            let further_block_node = get_node_by_id!(self.document, further_block_node_id);
             for child in further_block_node.children.iter() {
                 self.document.get_mut().relocate(*child, new_node_id);
             }
