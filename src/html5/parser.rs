@@ -330,8 +330,7 @@ impl<'stream> Html5Parser<'stream> {
                                 self.parse_error("doctype not allowed in initial insertion mode");
                             }
 
-                            let node = self.create_node(&self.current_token, HTML_NAMESPACE);
-                            self.document.get_mut().add_node(node, NodeId::root(), None);
+                            self.insert_doctype_element(&self.current_token.clone());
 
                             if self.document.get_mut().doctype != DocumentType::IframeSrcDoc
                                 && self.parser_cannot_change_mode

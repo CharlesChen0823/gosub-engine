@@ -169,6 +169,11 @@ impl<'stream> Html5Parser<'stream> {
         node_id
     }
 
+    pub fn insert_doctype_element(&mut self, token: &Token) {
+        let node = self.create_node(token, HTML_NAMESPACE);
+        self.document.get_mut().add_node(node, NodeId::root(), None);
+    }
+
     pub fn insert_document_element(&mut self, token: &Token) {
         let node = self.create_node(token, HTML_NAMESPACE);
         let node_id = self.document.get_mut().add_node(node, NodeId::root(), None);
