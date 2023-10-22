@@ -7,7 +7,6 @@ mod quirks;
 use self::document::DocumentHandle;
 
 use super::node::NodeId;
-use crate::html5::element_class::ElementClass;
 use crate::html5::error_logger::{ErrorLogger, ParseError, ParserError};
 use crate::html5::input_stream::InputStream;
 use crate::html5::node::{Node, NodeData, HTML_NAMESPACE, MATHML_NAMESPACE, SVG_NAMESPACE};
@@ -3253,7 +3252,7 @@ impl<'stream> Html5Parser<'stream> {
             let node_id = entry.node_id().expect("node id not found");
 
             let entry_node = get_node_by_id!(self.document, node_id).clone();
-            let new_node_id = self.clone_node_without_children(entry_node);
+            let new_node_id = self.insert_element_from_node(entry_node, None);
 
             self.active_formatting_elements[entry_index] = ActiveElement::Node(new_node_id);
 
@@ -3263,35 +3262,6 @@ impl<'stream> Html5Parser<'stream> {
 
             entry_index += 1;
         }
-    }
-
-    fn clone_node_without_children(&mut self, org_node: Node) -> NodeId {
-        // Create a node, but without children and push it onto the open elements stack (if needed)
-        let mut new_node = org_node.clone();
-        new_node.children = Vec::new();
-        new_node.parent = None;
-        new_node.is_registered = false;
-
-        if let NodeData::Element(ref mut element) = new_node.data {
-            if element.attributes.contains("class") {
-                if let Some(class_string) = element.attributes.get("class") {
-                    element.classes = ElementClass::from_string(class_string);
-                }
-            }
-        }
-
-        let node_id = self.document.get_mut().add_new_node(new_node);
-        let insert_position = self.appropriate_place_insert(None);
-        self.insert_element_helper(node_id, insert_position);
-
-        //     if parser not created as part of html fragment parsing algorithm
-        //       pop the top element queue from the relevant agent custom element reactions stack (???)
-
-        // push element onto the stack of open elements so that is the new current node
-        self.open_elements.push(node_id);
-
-        // return element
-        node_id
     }
 
     fn stop_parsing(&self) {

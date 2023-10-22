@@ -127,14 +127,14 @@ impl<'stream> Html5Parser<'stream> {
     }
 
     pub fn insert_html_element(&mut self, token: &Token) -> NodeId {
-        self.create_and_insert_element(token, None, Some(HTML_NAMESPACE))
+        self.insert_element_from_token(token, None, Some(HTML_NAMESPACE))
     }
 
     pub fn insert_foreign_element(&mut self, token: &Token, namespace: &str) -> NodeId {
-        self.create_and_insert_element(token, None, Some(namespace))
+        self.insert_element_from_token(token, None, Some(namespace))
     }
 
-    pub fn create_and_insert_element(
+    pub fn insert_element_from_token(
         &mut self,
         token: &Token,
         override_node: Option<NodeId>,
@@ -154,7 +154,31 @@ impl<'stream> Html5Parser<'stream> {
                 }
             }
         }
+        self.insert_element(node, override_node)
+    }
 
+    pub fn insert_element_from_node(
+        &mut self,
+        org_node: Node,
+        override_node: Option<NodeId>,
+    ) -> NodeId {
+        // Create a node, but without children and push it onto the open elements stack (if needed)
+        let mut new_node = org_node.clone();
+        new_node.children = Vec::new();
+        new_node.parent = None;
+        new_node.is_registered = false;
+
+        if let NodeData::Element(ref mut element) = new_node.data {
+            if element.attributes.contains("class") {
+                if let Some(class_string) = element.attributes.get("class") {
+                    element.classes = ElementClass::from_string(class_string);
+                }
+            }
+        }
+        self.insert_element(new_node, override_node)
+    }
+
+    pub fn insert_element(&mut self, node: Node, override_node: Option<NodeId>) -> NodeId {
         let node_id = self.document.get_mut().add_new_node(node);
         let insert_position = self.appropriate_place_insert(override_node);
         self.insert_element_helper(node_id, insert_position);
