@@ -127,14 +127,14 @@ impl<'stream> Html5Parser<'stream> {
     }
 
     pub fn insert_html_element(&mut self, token: &Token) -> NodeId {
-        self.insert_node_element(token, None, Some(HTML_NAMESPACE))
+        self.create_and_insert_element(token, None, Some(HTML_NAMESPACE))
     }
 
     pub fn insert_foreign_element(&mut self, token: &Token, namespace: &str) -> NodeId {
-        self.insert_node_element(token, None, Some(namespace))
+        self.create_and_insert_element(token, None, Some(namespace))
     }
 
-    pub fn insert_node_element(
+    pub fn create_and_insert_element(
         &mut self,
         token: &Token,
         override_node: Option<NodeId>,
