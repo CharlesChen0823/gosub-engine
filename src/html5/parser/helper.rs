@@ -29,13 +29,13 @@ impl<'stream> Html5Parser<'stream> {
         self.open_elements.iter().position(|x| x == node_id)
     }
 
-    fn find_format_element(&self, subject: &str) -> Option<(usize, NodeId)> {
+    fn find_format_element_index(&self, subject: &str) -> Option<(usize, NodeId)> {
         self.active_formatting_elements
             .iter()
             .enumerate()
             .rev()
-            .find_map(|(i, &x)| {
-                if let ActiveElement::Node(node_id) = x {
+            .find_map(|(i, &node_id)| {
+                if let ActiveElement::Node(node_id) = node_id {
                     if get_node_by_id!(self.document, node_id).name == subject {
                         Some((i, node_id))
                     } else {
@@ -47,14 +47,14 @@ impl<'stream> Html5Parser<'stream> {
             })
     }
 
-    fn find_further_block(&self, format_ele_position: usize) -> Option<(usize, NodeId)> {
+    fn find_further_block_index(&self, format_ele_position: usize) -> Option<(usize, NodeId)> {
         self.open_elements
             .iter()
             .enumerate()
             .skip(format_ele_position)
-            .find_map(|(i, &x)| {
-                if get_node_by_id!(self.document, x).is_special() {
-                    Some((i, x))
+            .find_map(|(i, &node_id)| {
+                if get_node_by_id!(self.document, node_id).is_special() {
+                    Some((i, node_id))
                 } else {
                     None
                 }
@@ -271,7 +271,7 @@ impl<'stream> Html5Parser<'stream> {
             outer_loop_counter += 1;
 
             // step 4.3
-            let (format_elem_idx, format_elem_node_id) = match self.find_format_element(subject) {
+            let (format_elem_idx, format_elem_node_id) = match self.find_format_element_index(subject) {
                 None => {
                     return self.handle_in_body_any_other_end_tag();
                 }
@@ -285,7 +285,7 @@ impl<'stream> Html5Parser<'stream> {
             {
                 // step 4.4
                 None => {
-                    self.parse_error("error");
+                    self.parse_error("not found format_element_node in open_elements");
                     self.active_formatting_elements.remove(format_elem_idx);
                     return;
                 }
@@ -294,18 +294,18 @@ impl<'stream> Html5Parser<'stream> {
 
             // step 4.5
             if !self.is_in_scope(&format_elem_node.name, Scope::Regular) {
-                self.parse_error("error");
+                self.parse_error("format_element_node not in regular scope");
                 return;
             }
 
             // step 4.6
             if format_elem_node_id != current_node_id {
-                self.parse_error("error");
+                self.parse_error("format_element_node not current_node");
             }
 
             // step 4.7
             let (further_block_idx, further_block_node_id) =
-                match self.find_further_block(format_ele_stack_position) {
+                match self.find_further_block_index(format_ele_stack_position) {
                     // step 4.8
                     None => {
                         self.open_elements.truncate(format_ele_stack_position);
@@ -450,10 +450,4 @@ impl<'stream> Html5Parser<'stream> {
             self.open_elements.insert(position + 1, new_node_id);
         }
     }
-}
-
-#[cfg(test)]
-mod test {
-    use super::*;
-    use crate::html5::input_stream::InputStream;
 }
