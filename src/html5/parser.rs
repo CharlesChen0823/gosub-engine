@@ -5,13 +5,11 @@ mod quirks;
 // ------------------------------------------------------------
 
 use self::document::DocumentHandle;
-use std::fmt::{self, Debug, Formatter};
 
 use super::node::NodeId;
 use crate::html5::element_class::ElementClass;
 use crate::html5::error_logger::{ErrorLogger, ParseError, ParserError};
 use crate::html5::input_stream::InputStream;
-use crate::html5::node::data::text::TextData;
 use crate::html5::node::{Node, NodeData, HTML_NAMESPACE, MATHML_NAMESPACE, SVG_NAMESPACE};
 use crate::html5::parser::attr_replacements::{
     MATHML_ADJUSTMENTS, SVG_ADJUSTMENTS, XML_ADJUSTMENTS,
@@ -136,7 +134,6 @@ macro_rules! open_elements_get {
 }
 
 #[macro_use]
-mod adoption_agency;
 mod helper;
 
 /// Insert location for a new node
@@ -166,19 +163,6 @@ impl NodeInsertLocation {
 enum ActiveElement {
     Node(NodeId),
     Marker,
-}
-
-impl Debug for ActiveElement {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            ActiveElement::Marker => {
-                write!(f, "marker")
-            }
-            ActiveElement::Node(node_id) => {
-                write!(f, "{:?}", node_id)
-            }
-        }
-    }
 }
 
 impl ActiveElement {
@@ -2763,7 +2747,7 @@ impl<'stream> Html5Parser<'stream> {
                 self.adjust_mathml_attributes(&mut token);
                 self.adjust_foreign_attributes(&mut token);
 
-                self.insert_foreign_element(&token, MATHML_NAMESPACE.into());
+                self.insert_foreign_element(&token, MATHML_NAMESPACE);
 
                 if *is_self_closing {
                     self.open_elements.pop();
@@ -2785,7 +2769,7 @@ impl<'stream> Html5Parser<'stream> {
 
                 self.adjust_svg_attributes(&mut token);
                 self.adjust_foreign_attributes(&mut token);
-                self.insert_foreign_element(&token, SVG_NAMESPACE.into());
+                self.insert_foreign_element(&token, SVG_NAMESPACE);
 
                 if *is_self_closing {
                     self.open_elements.pop();
@@ -3296,7 +3280,26 @@ impl<'stream> Html5Parser<'stream> {
         new_node.parent = None;
         new_node.is_registered = false;
 
-        self.insert_element_node(new_node)
+        if let NodeData::Element(ref mut element) = new_node.data {
+            if element.attributes.contains("class") {
+                if let Some(class_string) = element.attributes.get("class") {
+                    element.classes = ElementClass::from_string(class_string);
+                }
+            }
+        }
+
+        let node_id = self.document.get_mut().add_new_node(new_node);
+        let insert_position = self.appropriate_place_insert(None);
+        self.insert_helper(node_id, insert_position, false, None);
+
+        //     if parser not created as part of html fragment parsing algorithm
+        //       pop the top element queue from the relevant agent custom element reactions stack (???)
+
+        // push element onto the stack of open elements so that is the new current node
+        self.open_elements.push(node_id);
+
+        // return element
+        node_id
     }
 
     fn stop_parsing(&self) {
@@ -3361,59 +3364,6 @@ impl<'stream> Html5Parser<'stream> {
         }
     }
 
-    /// Creates a HTML node based on the token, and inserts the node into the document tree
-    fn insert_html_element_bk(&mut self, token: &Token) -> NodeId {
-        self.insert_foreign_element(token, Some(HTML_NAMESPACE))
-    }
-
-    /// Creates a unspecified node based on the token, and inserts the node into the document tree
-    fn insert_foreign_element(&mut self, token: &Token, namespace: Option<&str>) -> NodeId {
-        let node = self.create_node(token, namespace.unwrap_or(HTML_NAMESPACE));
-
-        self.insert_element_node(node)
-    }
-
-    /// Inserts an existing node into the document tree
-    fn insert_element_node(&mut self, mut node: Node) -> NodeId {
-        let mut adjusted_insert_location = self.adjusted_insert_location(None);
-
-        // add CSS classes from class attribute in element
-        // e.g., <div class="one two three">
-        // TODO: this will be refactored later in ElementAttributes to do this
-        // when inserting a "class" attribute. Similar to "id" to attach it to the DOM
-        // named_id_list. Although this will require some shared pointers
-        if let NodeData::Element(ref mut element) = node.data {
-            if element.attributes.contains("class") {
-                if let Some(class_string) = element.attributes.get("class") {
-                    element.classes = ElementClass::from_string(class_string);
-                }
-            }
-        }
-
-        // if parent_id is possible to insert element  (for instance: document already has child element etc)
-        //    if parser not created  as part of html fragmentparsing algorithm
-        //      push new element queue onto relevant agent custom element reactions stack (???)
-
-        //   insert element into adjusted_insert_location
-        let node_id = adjusted_insert_location.handle.get_mut().add_node(
-            // @TODO: is this correct to clone the &node?
-            node.clone(),
-            adjusted_insert_location.node_id,
-            adjusted_insert_location.position,
-        );
-
-        node.id = node_id;
-
-        //     if parser not created as part of html fragment parsing algorithm
-        //       pop the top element queue from the relevant agent custom element reactions stack (???)
-
-        // push element onto the stack of open elements so that is the new current node
-        self.open_elements.push(node_id);
-
-        // return element
-        node_id
-    }
-
     /// Switch the parser and tokenizer to the RAWTEXT state
     fn parse_raw_data(&mut self) {
         self.insert_html_element(&self.current_token.clone());
@@ -3432,116 +3382,6 @@ impl<'stream> Html5Parser<'stream> {
 
         self.original_insertion_mode = self.insertion_mode;
         self.insertion_mode = InsertionMode::Text;
-    }
-
-    fn adjusted_insert_location(&self, override_node: Option<&Node>) -> NodeInsertLocation {
-        let current_node = current_node!(self);
-        let target = match override_node {
-            Some(node) => node,
-            None => &current_node,
-        };
-
-        let insert_location = if self.foster_parenting
-            && ["table", "tbody", "thead", "tfoot", "tr"].contains(&target.name.as_str())
-        {
-            self.find_table_insertion_location()
-        } else {
-            NodeInsertLocation::new(Document::clone(&self.document), target.id, None)
-        };
-
-        let node = get_node_by_id!(insert_location.handle, insert_location.node_id);
-        if node.parent.is_some() {
-            let parent_node = get_node_by_id!(insert_location.handle, node.parent.unwrap());
-
-            if parent_node.name == "template" {
-                if let NodeData::Element(element) = parent_node.data {
-                    return NodeInsertLocation::new(
-                        element.template_contents.unwrap().doc,
-                        NodeId::root(),
-                        None,
-                    );
-                }
-            }
-        }
-
-        insert_location
-    }
-
-    fn find_table_insertion_location(&self) -> NodeInsertLocation {
-        let (_, last_template_node_id): (Option<usize>, Option<NodeId>) = self
-            .open_elements
-            .iter()
-            .enumerate()
-            .rev()
-            .find_map(|(idx, &node_id)| {
-                let node = get_node_by_id!(self.document, node_id);
-                if node.name == "template" {
-                    Some((Some(idx), Some(node_id)))
-                } else {
-                    None
-                }
-            })
-            .unwrap_or((None, None));
-
-        let (last_table_node_idx, last_table_node_id): (Option<usize>, Option<NodeId>) = self
-            .open_elements
-            .iter()
-            .enumerate()
-            .rev()
-            .find_map(|(idx, &node_id)| {
-                let node = get_node_by_id!(self.document, node_id);
-                if node.name == "table" {
-                    Some((Some(idx), Some(node_id)))
-                } else {
-                    None
-                }
-            })
-            .unwrap_or((None, None));
-
-        if let Some(last_template_id) = last_template_node_id {
-            if last_table_node_id.map_or(true, |table_id| last_template_id < table_id) {
-                if let NodeData::Element(element) =
-                    get_node_by_id!(self.document, last_template_id).data
-                {
-                    if let Some(template_contents) = element.template_contents {
-                        return NodeInsertLocation::new(
-                            template_contents.doc,
-                            NodeId::root(),
-                            None,
-                        );
-                    }
-                }
-            }
-        }
-
-        if last_table_node_id.is_none() {
-            // Return first element in open elements (which is HTML)
-            return NodeInsertLocation::new(
-                Document::clone(&self.document),
-                self.open_elements[0],
-                None,
-            );
-        }
-
-        let last_table_node = get_node_by_id!(self.document, last_table_node_id.unwrap());
-        if let Some(parent_node_id) = last_table_node.parent {
-            // Find the table node in the children of the parent, since we need to insert before this node
-            let parent_node = get_node_by_id!(self.document, parent_node_id);
-            let child_idx = parent_node
-                .children
-                .iter()
-                .position(|&node_id| node_id == last_table_node.id)
-                .expect("table node not found in parent node children");
-
-            return NodeInsertLocation::new(
-                Document::clone(&self.document),
-                parent_node_id,
-                Some(child_idx),
-            );
-        }
-
-        let previous_element = self.open_elements[last_table_node_idx.unwrap() - 1];
-        NodeInsertLocation::new(Document::clone(&self.document), previous_element, None)
     }
 
     #[cfg(feature = "debug_parser")]
@@ -3620,48 +3460,6 @@ impl<'stream> Html5Parser<'stream> {
                 return;
             }
         }
-    }
-
-    /// Inserts characters
-    fn insert_characters(&mut self, token: Token) {
-        let adjusted_insert_location = self.adjusted_insert_location(None);
-
-        let parent_node = get_node_by_id!(self.document, adjusted_insert_location.node_id);
-        if let NodeData::Document { .. } = parent_node.data {
-            // value is dropped, as we cannot add text to the document node
-            return;
-        }
-
-        // If we don't have any children, or we need to add in front, we never need to merge
-        if parent_node.children.is_empty() || Some(0) == adjusted_insert_location.position {
-            // The child node we need to insert after is not a text, so just add the text
-            let node = self.create_node(&self.current_token, HTML_NAMESPACE);
-            self.document.get_mut().add_node(node, parent_node.id, None);
-
-            return;
-        }
-
-        let child_idx = if adjusted_insert_location.position.is_none() {
-            parent_node.children.len()
-        } else {
-            adjusted_insert_location.position.unwrap()
-        };
-
-        // Check if the child we need to insert after is a text, is so, merge the texts
-        if let Some(insert_after_id) = parent_node.children.get(child_idx - 1) {
-            let mut doc_mut = self.document.get_mut();
-            let insert_after_node = doc_mut
-                .get_node_by_id_mut(*insert_after_id)
-                .expect("node not found");
-            if let NodeData::Text(TextData { ref mut value, .. }) = insert_after_node.data {
-                value.push_str(&token.to_string());
-                return;
-            }
-        }
-
-        // The child node we need to insert after is not a text, so just add the text
-        let node = self.create_node(&self.current_token, HTML_NAMESPACE);
-        self.document.get_mut().add_node(node, parent_node.id, None);
     }
 
     /// Fetches the next token from the tokenizer. However, if the token is a text token AND

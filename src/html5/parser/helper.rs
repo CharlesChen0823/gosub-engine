@@ -155,6 +155,10 @@ impl<'stream> Html5Parser<'stream> {
         self.insert_node_element(token, None, Some(HTML_NAMESPACE))
     }
 
+    pub fn insert_foreign_element(&mut self, token: &Token, namespace: &str) -> NodeId {
+        self.insert_node_element(token, None, Some(namespace))
+    }
+
     pub fn insert_node_element(
         &mut self,
         token: &Token,
@@ -291,7 +295,7 @@ impl<'stream> Html5Parser<'stream> {
                 None => {
                     return self.handle_in_body_any_other_end_tag();
                 }
-                Some((idx, node_id)) => (idx, node_id.clone()),
+                Some((idx, node_id)) => (idx, node_id),
             };
             let format_elem_node = self.get_node_id(&format_elem_node_id);
             let format_ele_stack_position = match self
@@ -328,7 +332,7 @@ impl<'stream> Html5Parser<'stream> {
                         self.active_formatting_elements.remove(format_elem_idx);
                         return;
                     }
-                    Some((idx, node_id)) => (idx, node_id.clone()),
+                    Some((idx, node_id)) => (idx, node_id),
                 };
 
             // step 4.9
@@ -465,7 +469,9 @@ impl<'stream> Html5Parser<'stream> {
 
             // step 4.19
             self.open_elements.retain(|x| x != &format_elem_node_id);
-            let position = self.position_in_open_element(&further_block_node_id).unwrap();
+            let position = self
+                .position_in_open_element(&further_block_node_id)
+                .unwrap();
             self.open_elements.insert(position + 1, new_node_id);
         }
     }
