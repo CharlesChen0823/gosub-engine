@@ -1,26 +1,21 @@
-use crate::html5_parser::node::{Node, NodeData, NodeId, HTML_NAMESPACE};
-use crate::html5_parser::parser::{ActiveElement, Html5Parser, Scope};
-use crate::html5_parser::tokenizer::token::Token;
+use crate::html5::node::{Node, NodeData, NodeId, HTML_NAMESPACE};
+use crate::html5::parser::{ActiveElement, Html5Parser, Scope};
+use crate::html5::tokenizer::token::Token;
 use std::collections::HashMap;
 
 const ADOPTION_AGENCY_OUTER_LOOP_DEPTH: usize = 8;
 const ADOPTION_AGENCY_INNER_LOOP_DEPTH: usize = 3;
 
-pub enum AdoptionResult {
-    ProcessAsAnyOther,
-    Completed,
-}
-
 impl<'stream> Html5Parser<'stream> {
     /**
      * When we talk about nodes, there are 3 contexts to consider:
      *
-     * - The actual node data. This is called "node" in the code.
-     * - The node id. This is called "node_id" in the code.
+     * - The actual node data. This is called "<something>_node" in the code (current_node, node, parent_node etc)
+     * - The node id. This is called "<something>_node_id" in the code (current_node_id, parent_node_id, node_id)
      * - The node index. This is called "node_idx" in the code. This is the index of the node in
-     *   either the open_elements or active_formatting_elements stack.
+     *   either the open_elements or active_formatting_elements stack (current_node_idx, node_idx, parent_node_idx)
      */
-    pub fn run_adoption_agency(&mut self, token: &Token) -> AdoptionResult {
+    pub fn run_adoption_agency(&mut self, token: &Token) {
         // Step 1
         let subject = match token {
             Token::EndTagToken { name, .. } => name,
@@ -37,7 +32,7 @@ impl<'stream> Html5Parser<'stream> {
                 .any(|elem| elem == &ActiveElement::Node(current_node_id))
         {
             self.open_elements.pop();
-            return AdoptionResult::Completed;
+            return;
         }
 
         // Step 3
@@ -47,7 +42,7 @@ impl<'stream> Html5Parser<'stream> {
         loop {
             // Step 4.1
             if outer_loop_counter >= ADOPTION_AGENCY_OUTER_LOOP_DEPTH {
-                return AdoptionResult::Completed;
+                return;
             }
 
             // Step 4.2
@@ -56,7 +51,8 @@ impl<'stream> Html5Parser<'stream> {
             // Step 4.3
             let formatting_element_idx_afe = self.find_formatting_element(subject);
             if formatting_element_idx_afe.is_none() {
-                return AdoptionResult::ProcessAsAnyOther;
+                self.handle_in_body_any_other_end_tag();
+                return;
             }
 
             let mut formatting_element_idx_afe =
@@ -73,13 +69,13 @@ impl<'stream> Html5Parser<'stream> {
                 self.active_formatting_elements
                     .remove(formatting_element_idx_afe);
 
-                return AdoptionResult::Completed;
+                return;
             }
 
             // Step 4.5
             if !self.is_in_scope(&formatting_element_node.name, Scope::Regular) {
                 self.parse_error("formatting element not in scope");
-                return AdoptionResult::Completed;
+                return;
             }
 
             // Step 4.6
@@ -107,7 +103,7 @@ impl<'stream> Html5Parser<'stream> {
                 self.active_formatting_elements
                     .remove(formatting_element_idx_afe);
 
-                return AdoptionResult::Completed;
+                return;
             }
 
             let furthest_block_idx_oe = furthest_block_idx_oe.expect("furthest block not found");
@@ -182,10 +178,10 @@ impl<'stream> Html5Parser<'stream> {
                     node_attributes,
                     HTML_NAMESPACE,
                 );
-                let replacement_node_id = self
-                    .document
-                    .get_mut()
-                    .add_node(replacement_node, common_ancestor_id);
+                let replacement_node_id =
+                    self.document
+                        .get_mut()
+                        .add_node(replacement_node, common_ancestor_id, None);
 
                 let afe_idx = self
                     .active_formatting_elements
@@ -215,9 +211,15 @@ impl<'stream> Html5Parser<'stream> {
             }
 
             // Step 4.14
-            self.document
-                .get_mut()
-                .relocate(last_node_id, common_ancestor_id);
+            let common_ancestor_node = get_node_by_id!(self.document, common_ancestor_id).clone();
+            let insert_location = self.adjusted_insert_location(Some(&common_ancestor_node));
+
+            self.document.detach_node_from_parent(last_node_id);
+            self.document.attach_node_to_parent(
+                last_node_id,
+                insert_location.node_id,
+                insert_location.position,
+            );
 
             // Step 4.15
             let new_element = match formatting_element_node.data {
@@ -231,10 +233,10 @@ impl<'stream> Html5Parser<'stream> {
             };
 
             // Step 4.17
-            let new_element_id = self
-                .document
-                .get_mut()
-                .add_node(new_element, furthest_block_id);
+            let new_element_id =
+                self.document
+                    .get_mut()
+                    .add_node(new_element, furthest_block_id, None);
 
             // Step 4.16
             for child in furthest_block_node.children.iter() {
@@ -245,7 +247,7 @@ impl<'stream> Html5Parser<'stream> {
             // if the bookmark_afe is BEFORE the formatting_elements_idx_afe, then we need to adjust
             // the formatting_element_idx, as we insert a new element and the formatting_element_idx_afe
             // has changed.
-            if bookmark_afe < formatting_element_idx_afe {
+            if bookmark_afe <= formatting_element_idx_afe {
                 formatting_element_idx_afe += 1;
             }
 
@@ -255,10 +257,11 @@ impl<'stream> Html5Parser<'stream> {
                 .remove(formatting_element_idx_afe);
 
             // Step 4.19
-            self.open_elements
-                .insert(furthest_block_idx_oe - 1, new_element_id);
             let idx = self.open_elements_find_index(formatting_element_id);
             self.open_elements.remove(idx);
+
+            let idx = self.open_elements_find_index(furthest_block_id);
+            self.open_elements.insert(idx + 1, new_element_id);
         }
     }
 
@@ -311,12 +314,15 @@ impl<'stream> Html5Parser<'stream> {
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::html5_parser::input_stream::InputStream;
+    use crate::html5::input_stream::InputStream;
 
     macro_rules! node_create {
         ($self:expr, $name:expr) => {{
             let node = Node::new_element(&$self.document, $name, HashMap::new(), HTML_NAMESPACE);
-            let node_id = $self.document.get_mut().add_node(node, NodeId::root());
+            let node_id = $self
+                .document
+                .get_mut()
+                .add_node(node, NodeId::root(), None);
             $self.open_elements.push(node_id);
         }};
     }

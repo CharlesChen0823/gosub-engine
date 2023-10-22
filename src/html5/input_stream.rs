@@ -1,4 +1,4 @@
-use crate::html5_parser::tokenizer::{CHAR_CR, CHAR_LF};
+use crate::html5::tokenizer::{CHAR_CR, CHAR_LF};
 use std::fs::File;
 use std::io::Read;
 use std::{fmt, io};
@@ -381,6 +381,16 @@ impl InputStream {
         self.seek(SeekMode::SeekEnd, 0);
 
         Element::Eof
+    }
+
+    /// Reads the current character
+    pub(crate) fn current_char(&self) -> Element {
+        self.look_ahead(0)
+    }
+
+    /// Reads the next character
+    pub(crate) fn next_char(&self) -> Element {
+        self.look_ahead(1)
     }
 
     pub(crate) fn unread(&mut self) {

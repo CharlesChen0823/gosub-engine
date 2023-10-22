@@ -1,8 +1,8 @@
 use super::parser::document::{Document, DocumentHandle};
-use crate::html5_parser::node::data::comment::CommentData;
-use crate::html5_parser::node::data::document::DocumentData;
-use crate::html5_parser::node::data::element::ElementData;
-use crate::html5_parser::node::data::text::TextData;
+use crate::html5::node::data::comment::CommentData;
+use crate::html5::node::data::document::DocumentData;
+use crate::html5::node::data::element::ElementData;
+use crate::html5::node::data::text::TextData;
 use core::fmt::Debug;
 use derive_more::Display;
 use std::collections::HashMap;
@@ -29,9 +29,13 @@ pub enum NodeType {
 /// Different type of node data
 #[derive(Debug, Clone, PartialEq)]
 pub enum NodeData {
+    /// Represents a document
     Document(DocumentData),
+    /// Represents a text
     Text(TextData),
+    /// Represents a comment
     Comment(CommentData),
+    /// Represents an element
     Element(Box<ElementData>),
 }
 
@@ -40,18 +44,21 @@ pub enum NodeData {
 pub struct NodeId(pub(crate) usize);
 
 impl From<NodeId> for usize {
+    /// Converts a NodeId into a usize
     fn from(value: NodeId) -> Self {
         value.0
     }
 }
 
 impl From<usize> for NodeId {
+    /// Converts a usize into a NodeId
     fn from(value: usize) -> Self {
         Self(value)
     }
 }
 
 impl Default for &NodeId {
+    /// Returns the default NodeId, which is 0
     fn default() -> Self {
         &NodeId(0)
     }
@@ -61,34 +68,41 @@ impl NodeId {
     // TODO: Drop Default derive and only use 0 for the root, or choose another id for the root
     pub const ROOT_NODE: usize = 0;
 
+    /// Returns the root node ID
     pub fn root() -> Self {
         Self(Self::ROOT_NODE)
     }
 
-    pub fn is_positive(&self) -> bool {
-        self.0 > 0
-    }
-
+    /// Returns true when this nodeId is the root node
     pub fn is_root(&self) -> bool {
         self.0 == Self::ROOT_NODE
     }
 
+    /// Returns the next node ID
     pub fn next(&self) -> Self {
-        // Might panic
+        if self.0 == usize::MAX {
+            return Self(usize::MAX);
+        }
+
         Self(self.0 + 1)
     }
 
+    /// Returns the nodeID as usize
     pub fn as_usize(&self) -> usize {
         self.0
     }
 
+    /// Returns the previous node ID
     pub fn prev(&self) -> Self {
-        // Might panic
+        if self.0 == 0 {
+            return Self::root();
+        }
+
         Self(self.0 - 1)
     }
 }
 
-/// Node that resembles a DOM node
+/// Node structure that resembles a DOM node
 #[derive(PartialEq)]
 pub struct Node {
     /// ID of the node, 0 is always the root / document node
@@ -107,6 +121,9 @@ pub struct Node {
     pub data: NodeData,
     /// pointer to document this node is attached to
     pub document: DocumentHandle,
+
+    // Returns true when the given node is registered into an arena
+    pub is_registered: bool,
 }
 
 impl Debug for Node {
@@ -117,7 +134,16 @@ impl Debug for Node {
         debug.field("parent", &self.parent);
         debug.field("children", &self.children);
         debug.field("name", &self.name);
-        debug.field("namespace", &self.namespace);
+        match &self.namespace {
+            Some(namespace) if namespace == HTML_NAMESPACE => debug.field("namespace", &"HTML"),
+            Some(namespace) if namespace == XML_NAMESPACE => debug.field("namespace", &"XML"),
+            Some(namespace) if namespace == XMLNS_NAMESPACE => debug.field("namespace", &"XMLNS"),
+            Some(namespace) if namespace == MATHML_NAMESPACE => debug.field("namespace", &"MATHML"),
+            Some(namespace) if namespace == SVG_NAMESPACE => debug.field("namespace", &"SVG"),
+            Some(namespace) if namespace == XLINK_NAMESPACE => debug.field("namespace", &"XLINK"),
+            None => debug.field("namespace", &"None"),
+            _ => debug.field("namespace", &"unknown"),
+        };
         debug.field("data", &self.data);
         debug.finish()
     }
@@ -142,6 +168,7 @@ impl Clone for Node {
             namespace: self.namespace.clone(),
             data: self.data.clone(),
             document: Document::clone(&self.document),
+            is_registered: self.is_registered,
         }
     }
 }
@@ -158,6 +185,7 @@ impl Node {
             name: "".to_string(),
             namespace: None,
             document: Document::clone(document),
+            is_registered: false,
         }
     }
 
@@ -182,10 +210,11 @@ impl Node {
             name: name.to_string(),
             namespace: Some(namespace.into()),
             document: Document::clone(document),
+            is_registered: false,
         }
     }
 
-    /// Create a new comment node
+    /// Creates a new comment node
     pub fn new_comment(document: &DocumentHandle, value: &str) -> Self {
         Node {
             id: Default::default(),
@@ -196,10 +225,11 @@ impl Node {
             name: "".to_string(),
             namespace: None,
             document: Document::clone(document),
+            is_registered: false,
         }
     }
 
-    /// Create a new text node
+    /// Creates a new text node
     pub fn new_text(document: &DocumentHandle, value: &str) -> Self {
         Node {
             id: Default::default(),
@@ -210,6 +240,7 @@ impl Node {
             name: "".to_string(),
             namespace: None,
             document: Document::clone(document),
+            is_registered: false,
         }
     }
 
@@ -240,7 +271,7 @@ impl Node {
         false
     }
 
-    /// Check if node has a named ID
+    /// Checks if node has a named ID
     pub fn has_named_id(&self) -> bool {
         if self.type_of() != NodeType::Element {
             return false;
@@ -249,7 +280,7 @@ impl Node {
         self.named_id.is_some()
     }
 
-    /// Set named ID (only applies to Element type, does nothing otherwise)
+    /// Sets named ID (only applies to Element type, does nothing otherwise)
     pub fn set_named_id(&mut self, named_id: &str) {
         if self.type_of() == NodeType::Element {
             self.named_id = Some(named_id.to_owned());
@@ -259,7 +290,7 @@ impl Node {
         }
     }
 
-    /// Get named ID. If not present or type is not Element, returns None
+    /// Gets named ID. If not present or type is not Element, returns None
     pub fn get_named_id(&self) -> Option<String> {
         if self.type_of() != NodeType::Element {
             return None;
@@ -272,15 +303,21 @@ impl Node {
         // don't want to return the actual internal String
         self.named_id.clone()
     }
+
+    /// Returns true if this node is registered into an arena
+    pub fn is_registered(&self) -> bool {
+        self.is_registered
+    }
 }
 
 pub trait NodeTrait {
-    /// Return the token type of the given token
+    /// Returns the token type of the given token
     fn type_of(&self) -> NodeType;
 }
 
 // Each node implements the NodeTrait and has a type_of that will return the node type.
 impl NodeTrait for Node {
+    /// Returns the token type of the given token
     fn type_of(&self) -> NodeType {
         match self.data {
             NodeData::Document { .. } => NodeType::Document,
@@ -291,15 +328,12 @@ impl NodeTrait for Node {
     }
 }
 
-pub static SCOPE_ELEMENTS: [&str; 9] = [
-    "applet", "caption", "html", "table", "td", "th", "marquee", "object", "template",
-];
-
+/// HTML elements that are considered formatting elements
 pub static FORMATTING_HTML_ELEMENTS: [&str; 14] = [
     "a", "b", "big", "code", "em", "font", "i", "nobr", "s", "small", "strike", "strong", "tt", "u",
 ];
 
-/// The HTML elements that are considered special elements
+/// HTML elements that are considered special elements
 pub static SPECIAL_HTML_ELEMENTS: [&str; 83] = [
     "address",
     "applet",
@@ -386,16 +420,16 @@ pub static SPECIAL_HTML_ELEMENTS: [&str; 83] = [
     "xmp",
 ];
 
-/// The MathML elements that are considered special elements
+/// MathML elements that are considered special elements
 pub static SPECIAL_MATHML_ELEMENTS: [&str; 6] = ["mi", "mo", "mn", "ms", "mtext", "annotation-xml"];
 
-/// The SVG elements that are considered special elements
+/// SVG elements that are considered special elements
 pub static SPECIAL_SVG_ELEMENTS: [&str; 3] = ["foreignObject", "desc", "title"];
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::html5_parser::parser::document::Document;
+    use crate::html5::parser::document::Document;
 
     #[test]
     fn new_document() {

@@ -1,5 +1,16 @@
 use super::FIXTURE_ROOT;
-use crate::types::Result;
+use crate::{
+    html5::{
+        error_logger::ParseError,
+        input_stream::InputStream,
+        node::{NodeData, NodeId},
+        parser::{
+            document::{Document, DocumentHandle},
+            Html5Parser,
+        },
+    },
+    types::Result,
+};
 use regex::Regex;
 use std::{
     fs::{self, File},
@@ -13,7 +24,7 @@ pub struct FixtureFile {
     pub path: PathBuf,
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Error {
     pub code: String,
     pub line: i64,
@@ -36,15 +47,316 @@ pub struct Test {
     document_fragment: Vec<String>,
 }
 
+pub enum NodeResult {
+    AttributeMatchFailure {
+        name: String,
+        actual: String,
+        expected: String,
+    },
+
+    ElementMatchFailure {
+        name: String,
+        actual: String,
+        expected: String,
+    },
+
+    ElementMatchSuccess {
+        actual: String,
+    },
+
+    TextMatchFailure {
+        actual: String,
+        expected: String,
+        text: String,
+    },
+
+    CommentMatchFailure {
+        actual: String,
+        expected: String,
+        comment: String,
+    },
+
+    TextMatchSuccess {
+        expected: String,
+    },
+}
+
+pub struct SubtreeResult {
+    pub node: Option<NodeResult>,
+    pub children: Vec<SubtreeResult>,
+    next_expected_idx: Option<usize>,
+}
+
+impl SubtreeResult {
+    pub fn valid(&self) -> bool {
+        self.next_expected_idx.is_some()
+    }
+}
+
+#[derive(PartialEq)]
+pub enum ErrorResult {
+    /// Found the correct error
+    Success { actual: Error },
+    /// Didn't find the error (not even with incorrect position)
+    Failure { actual: Error, expected: Error },
+    /// Found the error, but on an incorrect position
+    PositionFailure { actual: Error, expected: Error },
+}
+
+pub struct TestResult {
+    pub root: SubtreeResult,
+    pub actual_document: DocumentHandle,
+    pub actual_errors: Vec<ParseError>,
+}
+
+impl TestResult {
+    pub fn success(&self) -> bool {
+        self.root.valid()
+    }
+}
+
 impl Test {
     // Check that the tree construction code doesn't panic
-    pub fn run(&self) {
-        // TODO: Fill this in later
+    pub fn run(&self) -> Result<TestResult> {
+        let (actual_document, actual_errors) = self.parse()?;
+        let root = self.match_document_tree(&actual_document.get());
+
+        Ok(TestResult {
+            root,
+            actual_document,
+            actual_errors,
+        })
     }
 
     // Verify that the tree construction code obtains the right result
     pub fn assert_valid(&self) {
-        // TODO: Fill this in later
+        let result = self.run().expect("failed to parse");
+
+        fn assert_tree(tree: &SubtreeResult) {
+            match &tree.node {
+                Some(NodeResult::ElementMatchSuccess { .. })
+                | Some(NodeResult::TextMatchSuccess { .. })
+                | None => {}
+
+                Some(NodeResult::TextMatchFailure {
+                    actual, expected, ..
+                }) => {
+                    panic!("text match failed, wanted: [{expected}], got: [{actual}]");
+                }
+
+                Some(NodeResult::ElementMatchFailure {
+                    actual,
+                    expected,
+                    name,
+                }) => {
+                    panic!("element [{name}] match failed, wanted: [{expected}], got: [{actual}]");
+                }
+
+                Some(NodeResult::AttributeMatchFailure {
+                    name,
+                    actual,
+                    expected,
+                }) => {
+                    panic!(
+                        "attribute [{name}] match failed, wanted: [{expected}], got: [{actual}]"
+                    );
+                }
+
+                Some(NodeResult::CommentMatchFailure {
+                    actual, expected, ..
+                }) => {
+                    panic!("comment match failed, wanted: [{expected}], got: [{actual}]");
+                }
+            }
+
+            tree.children.iter().for_each(assert_tree);
+        }
+
+        assert_tree(&result.root);
+        assert!(result.success(), "invalid tree-construction result");
+    }
+
+    pub fn parse(&self) -> Result<(DocumentHandle, Vec<ParseError>)> {
+        // Do the actual parsing
+        let mut is = InputStream::new();
+        is.read_from_str(self.data.as_str(), None);
+
+        let mut parser = Html5Parser::new(&mut is);
+        let document = Document::shared();
+        let parse_errors = parser.parse(Document::clone(&document))?;
+
+        Ok((document, parse_errors))
+    }
+
+    fn match_document_tree(&self, document: &Document) -> SubtreeResult {
+        self.match_node(NodeId::root(), 0, -1, document)
+    }
+
+    fn match_node(
+        &self,
+        node_idx: NodeId,
+        document_offset_id: isize,
+        indent: isize,
+        document: &Document,
+    ) -> SubtreeResult {
+        let mut next_expected_idx = document_offset_id;
+
+        let node = document.get_node_by_id(node_idx).unwrap();
+
+        let node_result = match &node.data {
+            NodeData::Element(element) => {
+                let actual = format!(
+                    "|{}<{}>",
+                    " ".repeat((indent as usize * 2) + 1),
+                    element.name()
+                );
+                let expected = self.document[next_expected_idx as usize].to_owned();
+                next_expected_idx += 1;
+
+                if actual != expected {
+                    let node = Some(NodeResult::ElementMatchFailure {
+                        name: element.name().to_owned(),
+                        actual,
+                        expected,
+                    });
+
+                    return SubtreeResult {
+                        node,
+                        children: vec![],
+                        next_expected_idx: None,
+                    };
+                }
+
+                // Check attributes if any
+                for attr in element.attributes.iter() {
+                    let expected = self.document[next_expected_idx as usize].to_owned();
+                    next_expected_idx += 1;
+
+                    let actual = format!(
+                        "|{}{}=\"{}\"",
+                        " ".repeat((indent as usize * 2) + 3),
+                        attr.0,
+                        attr.1
+                    );
+
+                    if actual != expected {
+                        let node = Some(NodeResult::AttributeMatchFailure {
+                            name: element.name().to_owned(),
+                            actual,
+                            expected,
+                        });
+
+                        return SubtreeResult {
+                            node,
+                            children: vec![],
+                            next_expected_idx: None,
+                        };
+                    }
+                }
+
+                Some(NodeResult::ElementMatchSuccess { actual })
+            }
+
+            NodeData::Text(text) => {
+                let actual = format!(
+                    "|{}\"{}\"",
+                    " ".repeat(indent as usize * 2 + 1),
+                    text.value()
+                );
+                let expected = self.document[next_expected_idx as usize].to_owned();
+                next_expected_idx += 1;
+
+                if actual != expected {
+                    let node = Some(NodeResult::TextMatchFailure {
+                        actual,
+                        expected,
+                        text: text.value().to_owned(),
+                    });
+
+                    return SubtreeResult {
+                        node,
+                        children: vec![],
+                        next_expected_idx: None,
+                    };
+                }
+
+                Some(NodeResult::TextMatchSuccess { expected })
+            }
+
+            NodeData::Comment(comment) => {
+                let actual = format!(
+                    "|{}<!-- {} -->",
+                    " ".repeat(indent as usize * 2 + 1),
+                    comment.value()
+                );
+                let expected = self.document[next_expected_idx as usize].to_owned();
+                next_expected_idx += 1;
+
+                if actual != expected {
+                    let node = Some(NodeResult::CommentMatchFailure {
+                        actual,
+                        expected,
+                        comment: comment.value().to_owned(),
+                    });
+
+                    return SubtreeResult {
+                        node,
+                        children: vec![],
+                        next_expected_idx: None,
+                    };
+                }
+
+                Some(NodeResult::TextMatchSuccess { expected })
+            }
+            _ => None,
+        };
+
+        let mut children = vec![];
+
+        for &child_idx in &node.children {
+            let child_result = self.match_node(child_idx, next_expected_idx, indent + 1, document);
+            let next_id = child_result.next_expected_idx;
+            children.push(child_result);
+
+            if let Some(next_id) = next_id {
+                next_expected_idx = next_id as isize;
+                continue;
+            }
+
+            // Child node didn't match, exit early with what we have
+            return SubtreeResult {
+                node: node_result,
+                next_expected_idx: None,
+                children,
+            };
+        }
+
+        SubtreeResult {
+            node: node_result,
+            children,
+            next_expected_idx: Some(next_expected_idx as usize),
+        }
+    }
+
+    #[allow(dead_code)]
+    fn match_error(actual: &Error, expected: &Error) -> ErrorResult {
+        if actual == expected {
+            return ErrorResult::Success {
+                actual: actual.to_owned(),
+            };
+        }
+
+        if actual.code != expected.code {
+            return ErrorResult::Failure {
+                actual: actual.to_owned(),
+                expected: expected.to_owned(),
+            };
+        }
+
+        ErrorResult::PositionFailure {
+            expected: expected.to_owned(),
+            actual: actual.to_owned(),
+        }
     }
 }
 

@@ -1,11 +1,11 @@
-use crate::html5_parser::error_logger::ParserError;
-use crate::html5_parser::input_stream::Element;
+use crate::html5::error_logger::ParserError;
+use crate::html5::input_stream::Element;
 // use crate::read_char;
 
 extern crate lazy_static;
-use crate::html5_parser::input_stream::SeekMode::SeekCur;
-use crate::html5_parser::tokenizer::replacement_tables::{TOKEN_NAMED_CHARS, TOKEN_REPLACEMENTS};
-use crate::html5_parser::tokenizer::{Tokenizer, CHAR_REPLACEMENT};
+use crate::html5::input_stream::SeekMode::SeekCur;
+use crate::html5::tokenizer::replacement_tables::{TOKEN_NAMED_CHARS, TOKEN_REPLACEMENTS};
+use crate::html5::tokenizer::{Tokenizer, CHAR_REPLACEMENT};
 use lazy_static::lazy_static;
 
 /// Different states for the character references
@@ -326,11 +326,14 @@ impl<'stream> Tokenizer<'stream> {
     /// replacement OR None when no entity has been found.
     fn find_entity(&mut self) -> Option<String> {
         let s = self.stream.look_ahead_slice(*LONGEST_ENTITY_LENGTH);
+        let chars: Vec<char> = s.chars().collect();
+
         for i in (0..=s.len()).rev() {
-            if TOKEN_NAMED_CHARS.contains_key(&s[0..i]) {
-                // Move forward with the number of chars matching
-                // self.stream.skip(i);
-                return Some(String::from(&s[0..i]));
+            if let Some(slice) = chars.get(0..i) {
+                let entity: String = slice.iter().collect();
+                if TOKEN_NAMED_CHARS.contains_key(entity.as_str()) {
+                    return Some(entity);
+                }
             }
         }
         None
@@ -347,8 +350,8 @@ lazy_static! {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::html5_parser::error_logger::ErrorLogger;
-    use crate::html5_parser::input_stream::InputStream;
+    use crate::html5::error_logger::ErrorLogger;
+    use crate::html5::input_stream::InputStream;
     use std::cell::RefCell;
     use std::rc::Rc;
 

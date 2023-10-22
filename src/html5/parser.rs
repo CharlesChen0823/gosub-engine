@@ -6,21 +6,20 @@ mod quirks;
 
 use self::document::DocumentHandle;
 
-use super::node::{NodeId, SCOPE_ELEMENTS};
-use crate::html5_parser::element_class::ElementClass;
-use crate::html5_parser::error_logger::{ErrorLogger, ParseError, ParserError};
-use crate::html5_parser::input_stream::InputStream;
-use crate::html5_parser::node::data::text::TextData;
-use crate::html5_parser::node::{Node, NodeData, HTML_NAMESPACE, MATHML_NAMESPACE, SVG_NAMESPACE};
-use crate::html5_parser::parser::adoption_agency::AdoptionResult;
-use crate::html5_parser::parser::attr_replacements::{
-    MATHML_ADJUSTMENTS, SVG_ADJUSTMENTS_ATTRIBUTES, SVG_ADJUSTMENTS_TAG, XML_ADJUSTMENTS,
+use super::node::NodeId;
+use crate::html5::element_class::ElementClass;
+use crate::html5::error_logger::{ErrorLogger, ParseError, ParserError};
+use crate::html5::input_stream::InputStream;
+use crate::html5::node::data::text::TextData;
+use crate::html5::node::{Node, NodeData, HTML_NAMESPACE, MATHML_NAMESPACE, SVG_NAMESPACE};
+use crate::html5::parser::attr_replacements::{
+    MATHML_ADJUSTMENTS, SVG_ADJUSTMENTS, XML_ADJUSTMENTS,
 };
-use crate::html5_parser::parser::document::{Document, DocumentFragment, DocumentType};
-use crate::html5_parser::parser::quirks::QuirksMode;
-use crate::html5_parser::tokenizer::state::State;
-use crate::html5_parser::tokenizer::token::Token;
-use crate::html5_parser::tokenizer::{Tokenizer, CHAR_NUL, CHAR_REPLACEMENT};
+use crate::html5::parser::document::{Document, DocumentFragment, DocumentType};
+use crate::html5::parser::quirks::QuirksMode;
+use crate::html5::tokenizer::state::State;
+use crate::html5::tokenizer::token::Token;
+use crate::html5::tokenizer::{Tokenizer, CHAR_NUL};
 use crate::types::Result;
 use alloc::rc::Rc;
 use core::cell::RefCell;
@@ -149,12 +148,6 @@ pub struct NodeInsertLocation {
     position: Option<usize>,
 }
 
-pub enum InsertionPoint<NodeId> {
-    LastChild(NodeId),
-    BeforeSibing(NodeId),
-    TableForsterParenting { curren: NodeId, prev: NodeId },
-}
-
 impl NodeInsertLocation {
     /// Creates a new NodeInsertLocation
     pub fn new(handle: DocumentHandle, node_id: NodeId, position: Option<usize>) -> Self {
@@ -220,12 +213,19 @@ pub struct Html5Parser<'stream> {
     active_formatting_elements: Vec<ActiveElement>,
     /// Is the current parsing a fragment case
     is_fragment_case: bool,
-    /// The context element for the fragment parsing algorithm
-    context_elem: Option<NodeId>,
     /// A reference to the document we are parsing
     document: DocumentHandle,
     /// Error logger, which is shared with the tokenizer
     error_logger: Rc<RefCell<ErrorLogger>>,
+    /// Levels of scripting we currently are in
+    script_nesting_level: u32,
+    /// If true, the parser is paused
+    parser_pause_flag: bool,
+    /// Keeps the position of where any document.write() should be inserted when running a script
+    insertion_point: Option<usize>,
+
+    // Sometimes tokens needs to be split up (and it seems the tokenizer cannot do this?)
+    token_queue: Vec<Token>,
 }
 
 /// Defines the scopes for in_scope()
@@ -270,9 +270,12 @@ impl<'stream> Html5Parser<'stream> {
             ack_self_closing: false,
             active_formatting_elements: vec![],
             is_fragment_case: false,
-            context_elem: None,
             document,
             error_logger,
+            script_nesting_level: 0,
+            parser_pause_flag: false,
+            insertion_point: None,
+            token_queue: vec![],
         }
     }
 
@@ -286,7 +289,7 @@ impl<'stream> Html5Parser<'stream> {
         loop {
             // If reprocess_token is true, we should process the same token again
             if !self.reprocess_token {
-                self.current_token = self.tokenizer.next_token()?;
+                self.current_token = self.fetch_next_token();
             }
             self.reprocess_token = false;
 
@@ -295,13 +298,7 @@ impl<'stream> Html5Parser<'stream> {
                 break;
             }
 
-            println!(
-                "Token: {}, self.insertion_mode {:?}",
-                self.current_token, self.insertion_mode
-            );
-
             match self.insertion_mode {
-                // Checked: 1
                 InsertionMode::Initial => {
                     let mut anything_else = false;
 
@@ -311,10 +308,9 @@ impl<'stream> Html5Parser<'stream> {
                             continue;
                         }
                         Token::CommentToken { .. } => {
-                            self.insert_comment(
-                                &self.current_token.clone(),
-                                Some(NodeId::default()),
-                            );
+                            let node = self.create_node(&self.current_token, HTML_NAMESPACE);
+                            // add to end of the document(node)
+                            self.document.get_mut().add_node(node, NodeId::root(), None);
                         }
                         Token::DocTypeToken {
                             name,
@@ -331,7 +327,7 @@ impl<'stream> Html5Parser<'stream> {
                             }
 
                             let node = self.create_node(&self.current_token, HTML_NAMESPACE);
-                            self.document.get_mut().add_node(node, NodeId::root());
+                            self.document.get_mut().add_node(node, NodeId::root(), None);
 
                             if self.document.get_mut().doctype != DocumentType::IframeSrcDoc
                                 && self.parser_cannot_change_mode
@@ -378,7 +374,6 @@ impl<'stream> Html5Parser<'stream> {
                         self.reprocess_token = true;
                     }
                 }
-                // Checked: 1
                 InsertionMode::BeforeHtml => {
                     let mut anything_else = false;
 
@@ -387,16 +382,14 @@ impl<'stream> Html5Parser<'stream> {
                             self.parse_error("doctype not allowed in before html insertion mode");
                         }
                         Token::CommentToken { .. } => {
-                            self.insert_comment(
-                                &self.current_token.clone(),
-                                Some(NodeId::default()),
-                            );
+                            let node = self.create_node(&self.current_token, HTML_NAMESPACE);
+                            self.document.get_mut().add_node(node, NodeId::root(), None);
                         }
                         Token::TextToken { .. } if self.current_token.is_empty_or_white() => {
                             // ignore token
                         }
                         Token::StartTagToken { name, .. } if name == "html" => {
-                            self.insert_html_document(&self.current_token.clone());
+                            self.insert_html_element(&self.current_token.clone());
 
                             self.insertion_mode = InsertionMode::BeforeHead;
                         }
@@ -422,13 +415,12 @@ impl<'stream> Html5Parser<'stream> {
                             is_self_closing: false,
                             attributes: HashMap::new(),
                         };
-                        self.insert_html_document(&token);
+                        self.insert_html_element(&token);
 
                         self.insertion_mode = InsertionMode::BeforeHead;
                         self.reprocess_token = true;
                     }
                 }
-                // Checked: 1
                 InsertionMode::BeforeHead => {
                     let mut anything_else = false;
 
@@ -437,7 +429,9 @@ impl<'stream> Html5Parser<'stream> {
                             // ignore token
                         }
                         Token::CommentToken { .. } => {
-                            self.insert_comment(&self.current_token.clone(), None);
+                            let node = self.create_node(&self.current_token, HTML_NAMESPACE);
+                            let parent_id = current_node!(self).id;
+                            self.document.get_mut().add_node(node, parent_id, None);
                         }
                         Token::DocTypeToken { .. } => {
                             self.parse_error("doctype not allowed in before head insertion mode");
@@ -479,9 +473,7 @@ impl<'stream> Html5Parser<'stream> {
                         self.reprocess_token = true;
                     }
                 }
-                // Checked: 1
                 InsertionMode::InHead => self.handle_in_head(),
-                // Checked: 1
                 InsertionMode::InHeadNoscript => {
                     let mut anything_else = false;
 
@@ -545,16 +537,17 @@ impl<'stream> Html5Parser<'stream> {
                         self.reprocess_token = true;
                     }
                 }
-                // Checked: 1
                 InsertionMode::AfterHead => {
                     let mut anything_else = false;
 
                     match &self.current_token {
                         Token::TextToken { .. } if self.current_token.is_empty_or_white() => {
-                            self.insert_character_element(&self.current_token.clone());
+                            self.insert_characters(self.current_token.clone());
                         }
                         Token::CommentToken { .. } => {
-                            self.insert_comment(&self.current_token.clone(), None);
+                            let node = self.create_node(&self.current_token, HTML_NAMESPACE);
+                            let parent_id = current_node!(self).id;
+                            self.document.get_mut().add_node(node, parent_id, None);
                         }
                         Token::DocTypeToken { .. } => {
                             self.parse_error("doctype not allowed in after head insertion mode");
@@ -639,13 +632,11 @@ impl<'stream> Html5Parser<'stream> {
                         self.reprocess_token = true;
                     }
                 }
-                // Checked:
                 InsertionMode::InBody => self.handle_in_body(),
-                // Checked: 1
                 InsertionMode::Text => {
                     match &self.current_token {
                         Token::TextToken { .. } => {
-                            self.insert_character_element(&self.current_token.clone());
+                            self.insert_characters(self.current_token.clone());
                         }
                         Token::EofToken => {
                             self.parse_error("eof not allowed in text insertion mode");
@@ -658,7 +649,26 @@ impl<'stream> Html5Parser<'stream> {
                             self.reprocess_token = true;
                         }
                         Token::EndTagToken { name, .. } if name == "script" => {
-                            // @TODO: do script stuff!!!!
+                            // @todo: If the active speculative HTML parser is null and the JavaScript execution context stack is empty, then perform a microtask checkpoint.
+
+                            let _script = current_node!(self);
+
+                            self.open_elements.pop();
+                            self.insertion_mode = self.original_insertion_mode;
+
+                            let old_insertion_point = self.insertion_point;
+                            self.insertion_point = Some(self.tokenizer.get_position().offset);
+
+                            self.script_nesting_level += 1;
+
+                            // do script stuff
+
+                            self.script_nesting_level -= 1;
+                            if self.script_nesting_level == 0 {
+                                self.parser_pause_flag = false;
+                            }
+
+                            self.insertion_point = old_insertion_point;
                         }
                         _ => {
                             self.open_elements.pop();
@@ -666,9 +676,7 @@ impl<'stream> Html5Parser<'stream> {
                         }
                     }
                 }
-                // Checked: 1
                 InsertionMode::InTable => self.handle_in_table(),
-                // Checked: 1
                 InsertionMode::InTableText => {
                     match &self.current_token {
                         Token::TextToken { .. } if self.current_token.is_null() => {
@@ -702,14 +710,16 @@ impl<'stream> Html5Parser<'stream> {
                             }
 
                             if process_as_intable_anything_else {
+                                let tmp = self.current_token.clone();
                                 self.current_token = Token::TextToken { value: tokens };
                                 self.foster_parenting = true;
                                 self.handle_in_body();
                                 self.foster_parenting = false;
+
+                                self.current_token = tmp;
                             } else {
-                                self.insert_character_element(&Token::TextToken {
-                                    value: tokens.clone(),
-                                });
+                                let token = Token::TextToken { value: tokens };
+                                self.insert_characters(token);
                             }
 
                             self.pending_table_character_tokens.clear();
@@ -719,7 +729,6 @@ impl<'stream> Html5Parser<'stream> {
                         }
                     }
                 }
-                // Checked: 1
                 InsertionMode::InCaption => {
                     let mut process_incaption_body = false;
 
@@ -771,7 +780,7 @@ impl<'stream> Html5Parser<'stream> {
                             // @TODO: check what fragment case means
                         }
 
-                        self.generate_all_implied_end_tags(None, false);
+                        self.generate_implied_end_tags(None, false);
 
                         if current_node!(self).name != "caption" {
                             self.parse_error("caption end tag not at top of stack");
@@ -783,14 +792,15 @@ impl<'stream> Html5Parser<'stream> {
                         self.insertion_mode = InsertionMode::InTable;
                     }
                 }
-                // Checked: 1
                 InsertionMode::InColumnGroup => {
                     match &self.current_token {
                         Token::TextToken { .. } if self.current_token.is_empty_or_white() => {
-                            self.insert_character_element(&self.current_token.clone());
+                            self.insert_characters(self.current_token.clone());
                         }
                         Token::CommentToken { .. } => {
-                            self.insert_comment(&self.current_token.clone(), None);
+                            let node = self.create_node(&self.current_token, HTML_NAMESPACE);
+                            let parent_id = current_node!(self).id;
+                            self.document.get_mut().add_node(node, parent_id, None);
                         }
                         Token::DocTypeToken { .. } => {
                             self.parse_error("doctype not allowed in column group insertion mode");
@@ -888,7 +898,6 @@ impl<'stream> Html5Parser<'stream> {
                     //     self.reprocess_token = true;
                     // }
                 }
-                // Checked: 1
                 InsertionMode::InTableBody => {
                     match &self.current_token {
                         Token::StartTagToken { name, .. } if name == "tr" => {
@@ -953,7 +962,9 @@ impl<'stream> Html5Parser<'stream> {
                                 && !self.is_in_scope("tfoot", Scope::Table)
                                 && !self.is_in_scope("thead", Scope::Table)
                             {
-                                self.parse_error("caption, col, colgroup, tbody, tfoot or thead tag not allowed in in table body insertion mode");
+                                self.parse_error(
+                                    "table end tag not allowed in in table body insertion mode",
+                                );
                                 continue;
                             }
 
@@ -977,7 +988,6 @@ impl<'stream> Html5Parser<'stream> {
                         }
                     }
                 }
-                // Checked: 1
                 InsertionMode::InRow => {
                     match &self.current_token {
                         Token::StartTagToken { name, .. } if name == "th" || name == "td" => {
@@ -1067,7 +1077,6 @@ impl<'stream> Html5Parser<'stream> {
                         _ => self.handle_in_table(),
                     }
                 }
-                // Checked: 1
                 InsertionMode::InCell => {
                     match &self.current_token {
                         Token::EndTagToken { name, .. } if name == "th" || name == "td" => {
@@ -1081,7 +1090,7 @@ impl<'stream> Html5Parser<'stream> {
                                 continue;
                             }
 
-                            self.generate_all_implied_end_tags(None, false);
+                            self.generate_implied_end_tags(None, false);
 
                             if current_node!(self).name != token_name {
                                 self.parse_error("current node should be th or td");
@@ -1140,9 +1149,151 @@ impl<'stream> Html5Parser<'stream> {
                         _ => self.handle_in_body(),
                     }
                 }
-                // Checked: 1
-                InsertionMode::InSelect => self.handle_in_select(),
-                // Checked: 1
+                InsertionMode::InSelect => {
+                    match &self.current_token {
+                        Token::TextToken { .. } if self.current_token.is_null() => {
+                            self.parse_error(
+                                "null character not allowed in in select insertion mode",
+                            );
+                            // ignore token
+                        }
+                        Token::TextToken { .. } => {
+                            self.insert_characters(self.current_token.clone());
+                        }
+                        Token::CommentToken { .. } => {
+                            let node = self.create_node(&self.current_token, HTML_NAMESPACE);
+                            self.insert_element_node(node);
+                        }
+                        Token::DocTypeToken { .. } => {
+                            self.parse_error("doctype not allowed in in select insertion mode");
+                            // ignore token
+                        }
+                        Token::StartTagToken { name, .. } if name == "html" => {
+                            self.handle_in_body();
+                        }
+                        Token::StartTagToken { name, .. } if name == "option" => {
+                            if current_node!(self).name == "option" {
+                                self.open_elements.pop();
+                            }
+
+                            self.insert_html_element(&self.current_token.clone());
+                        }
+                        Token::StartTagToken { name, .. } if name == "optgroup" => {
+                            if current_node!(self).name == "option" {
+                                self.open_elements.pop();
+                            }
+
+                            if current_node!(self).name == "optgroup" {
+                                self.open_elements.pop();
+                            }
+
+                            self.insert_html_element(&self.current_token.clone());
+                        }
+                        Token::StartTagToken {
+                            name,
+                            is_self_closing,
+                            ..
+                        } if name == "hr" => {
+                            if current_node!(self).name == "option" {
+                                self.open_elements.pop();
+                            }
+
+                            if current_node!(self).name == "optgroup" {
+                                self.open_elements.pop();
+                            }
+
+                            self.acknowledge_closing_tag(*is_self_closing);
+
+                            self.insert_html_element(&self.current_token.clone());
+                            self.open_elements.pop();
+                        }
+                        Token::EndTagToken { name, .. } if name == "optgroup" => {
+                            if current_node!(self).name == "option"
+                                && self.open_elements.len() > 1
+                                && open_elements_get!(self, self.open_elements.len() - 1).name
+                                    == "optgroup"
+                            {
+                                self.open_elements.pop();
+                            }
+
+                            if current_node!(self).name == "optgroup" {
+                                self.open_elements.pop();
+                            } else {
+                                self.parse_error(
+                                    "optgroup end tag not allowed in in select insertion mode",
+                                );
+                                // ignore token
+                                continue;
+                            }
+                        }
+                        Token::EndTagToken { name, .. } if name == "option" => {
+                            if current_node!(self).name == "option" {
+                                self.open_elements.pop();
+                            } else {
+                                self.parse_error(
+                                    "option end tag not allowed in in select insertion mode",
+                                );
+                                // ignore token
+                                continue;
+                            }
+                        }
+                        Token::EndTagToken { name, .. } if name == "select" => {
+                            if !self.is_in_scope("select", Scope::Select) {
+                                self.parse_error(
+                                    "select end tag not allowed in in select insertion mode",
+                                );
+                                // ignore token
+                                continue;
+                            }
+
+                            self.pop_until("select");
+                            self.reset_insertion_mode();
+                        }
+                        Token::StartTagToken { name, .. } if name == "select" => {
+                            self.parse_error("select tag not allowed in in select insertion mode");
+
+                            if !self.is_in_scope("select", Scope::Select) {
+                                // ignore token (fragment case?)
+                                continue;
+                            }
+
+                            self.pop_until("select");
+                            self.reset_insertion_mode();
+                        }
+                        Token::StartTagToken { name, .. }
+                            if name == "input" || name == "keygen" || name == "textarea" =>
+                        {
+                            self.parse_error("input, keygen or textarea tag not allowed in in select insertion mode");
+
+                            if !self.is_in_scope("select", Scope::Select) {
+                                // ignore token (fragment case)
+                                continue;
+                            }
+
+                            self.pop_until("select");
+                            self.reset_insertion_mode();
+                            self.reprocess_token = true;
+                        }
+
+                        Token::StartTagToken { name, .. }
+                            if name == "script" || name == "template" =>
+                        {
+                            self.handle_in_head();
+                        }
+                        Token::EndTagToken { name, .. } if name == "template" => {
+                            self.handle_in_head();
+                        }
+                        Token::EofToken => {
+                            self.handle_in_body();
+                        }
+                        _ => {
+                            self.parse_error(
+                                "anything else not allowed in in select insertion mode",
+                            );
+                            // ignore token
+                        }
+                    }
+                }
                 InsertionMode::InSelectInTable => {
                     match &self.current_token {
                         Token::StartTagToken { name, .. }
@@ -1185,7 +1336,6 @@ impl<'stream> Html5Parser<'stream> {
                         _ => self.handle_in_select(),
                     }
                 }
-                // Checked: 1
                 InsertionMode::InTemplate => {
                     match &self.current_token {
                         Token::TextToken { .. } => {
@@ -1278,7 +1428,6 @@ impl<'stream> Html5Parser<'stream> {
                         }
                     }
                 }
-                // Checked: 1
                 InsertionMode::AfterBody => {
                     match &self.current_token {
                         Token::TextToken { .. } if self.current_token.is_empty_or_white() => {
@@ -1286,7 +1435,7 @@ impl<'stream> Html5Parser<'stream> {
                         }
                         Token::CommentToken { .. } => {
                             let html_node_id = self.open_elements.first().unwrap_or_default();
-                            self.insert_comment(&self.current_token.clone(), Some(*html_node_id));
+                            self.document.get_mut().add_node(node, *html_node_id, None);
                         }
                         Token::DocTypeToken { .. } => {
                             self.parse_error("doctype not allowed in after body insertion mode");
@@ -1312,14 +1461,14 @@ impl<'stream> Html5Parser<'stream> {
                         }
                     }
                 }
-                // Checked: 1
                 InsertionMode::InFrameset => {
                     match &self.current_token {
                         Token::TextToken { .. } if self.current_token.is_empty_or_white() => {
-                            self.insert_character_element(&self.current_token.clone());
+                            self.insert_characters(self.current_token.clone());
                         }
                         Token::CommentToken { .. } => {
-                            self.insert_comment(&self.current_token.clone(), None);
+                            let node = self.create_node(&self.current_token, HTML_NAMESPACE);
+                            self.insert_element_node(node);
                         }
                         Token::DocTypeToken { .. } => {
                             self.parse_error("doctype not allowed in frameset insertion mode");
@@ -1374,14 +1523,14 @@ impl<'stream> Html5Parser<'stream> {
                         }
                     }
                 }
-                // Checked: 1
                 InsertionMode::AfterFrameset => {
                     match &self.current_token {
                         Token::TextToken { .. } if self.current_token.is_empty_or_white() => {
-                            self.insert_character_element(&self.current_token.clone());
+                            self.insert_characters(self.current_token.clone());
                         }
                         Token::CommentToken { .. } => {
-                            self.insert_comment(&self.current_token.clone(), None);
+                            let node = self.create_node(&self.current_token, HTML_NAMESPACE);
+                            self.insert_element_node(node);
                         }
                         Token::DocTypeToken { .. } => {
                             self.parse_error("doctype not allowed in frameset insertion mode");
@@ -1407,10 +1556,10 @@ impl<'stream> Html5Parser<'stream> {
                         }
                     }
                 }
-                // Checked: 1
                 InsertionMode::AfterAfterBody => match &self.current_token {
                     Token::CommentToken { .. } => {
-                        self.insert_comment(&self.current_token.clone(), Some(NodeId::default()));
+                        let node = self.create_node(&self.current_token, HTML_NAMESPACE);
+                        self.document.get_mut().add_node(node, NodeId::root(), None);
                     }
                     Token::DocTypeToken { .. } => {
                         self.handle_in_body();
@@ -1432,14 +1581,11 @@ impl<'stream> Html5Parser<'stream> {
                         self.reprocess_token = true;
                     }
                 },
-                // Checked: 1
                 InsertionMode::AfterAfterFrameset => {
                     match &self.current_token {
                         Token::CommentToken { .. } => {
-                            self.insert_comment(
-                                &self.current_token.clone(),
-                                Some(NodeId::default()),
-                            );
+                            let node = self.create_node(&self.current_token, HTML_NAMESPACE);
+                            self.document.get_mut().add_node(node, NodeId::root(), None);
                         }
                         Token::DocTypeToken { .. } => {
                             self.handle_in_body();
@@ -1473,95 +1619,6 @@ impl<'stream> Html5Parser<'stream> {
         Ok(self.error_logger.borrow().get_errors().clone())
     }
 
-    fn is_fragment(&self) -> bool {
-        self.context_elem.is_some()
-    }
-
-    fn adjusted_current_node(&self) -> &NodeId {
-        if self.open_elements.len() == 1 {
-            if let Some(ctx) = self.context_elem.as_ref() {
-                return ctx;
-            }
-        }
-        self.open_elements.last().expect("node not found")
-    }
-
-    fn mathml_text_integration_point(&self, node: &Node) -> bool {
-        if node.namespace != Some(MATHML_NAMESPACE.into()) {
-            return false;
-        }
-        if !["mi", "mo", "mn", "ms", "mtext"].contains(&node.name.as_str()) {
-            return false;
-        }
-        true
-    }
-
-    fn svg_html_integration_point(&self, node: &Node) -> bool {
-        if node.namespace != Some(SVG_NAMESPACE.into()) {
-            return false;
-        }
-
-        if !["foreignObject", "desc", "title"].contains(&node.name.as_str()) {
-            return false;
-        }
-        true
-    }
-
-    fn is_foreign(&self, token: &Token) -> bool {
-        if let Token::EofToken = *token {
-            return false;
-        }
-
-        if self.open_elements.is_empty() {
-            return false;
-        }
-
-        let node_id = self.adjusted_current_node();
-        let node = self
-            .document
-            .get()
-            .get_node_by_id(*node_id)
-            .expect("node not found")
-            .clone();
-        if node.namespace == Some(HTML_NAMESPACE.into()) {
-            return false;
-        }
-
-        if self.mathml_text_integration_point(&node) {
-            if let Token::StartTagToken { ref name, .. } = *token {
-                if name == "mglyph" || name == "malignmark" {
-                    return false;
-                }
-            }
-            if let Token::TextToken { .. } = *token {
-                return false;
-            }
-        }
-
-        if self.svg_html_integration_point(&node) {
-            if let Token::TextToken { .. } = *token {
-                return false;
-            }
-            if let Token::StartTagToken { .. } = *token {
-                return false;
-            }
-        }
-
-        if node.namespace == Some(MATHML_NAMESPACE.into()) && node.name == "annotation-xml" {
-            if let Token::StartTagToken { ref name, .. } = *token {
-                if name == "svg" {
-                    return false;
-                }
-                return !self.mathml_text_integration_point(&node);
-            }
-            if let Token::TextToken { .. } = *token {
-                return !self.mathml_text_integration_point(&node);
-            }
-        }
-
-        true
-    }
-
     fn acknowledge_closing_tag(&mut self, is_self_closing: bool) {
         if is_self_closing {
             self.ack_self_closing = true;
@@ -1586,22 +1643,20 @@ impl<'stream> Html5Parser<'stream> {
 
     /// Pops the last element from the open elements until we reach any of the elements in $arr
     fn pop_until_any(&mut self, arr: &[&str]) {
-        let mut pop_count = 0;
+        while !self.open_elements.is_empty() {
+            let node_id = self.open_elements.pop();
+            if node_id.is_none() {
+                break;
+            }
 
-        for node_id in self.open_elements.iter().rev() {
-            if arr.contains(&get_node_by_id!(self.document, *node_id).name.as_str()) {
-                pop_count += 1;
-            } else {
+            let tag = get_node_by_id!(self.document, node_id.expect("node_id not found")).name;
+            if arr.contains(&tag.as_str()) {
                 break;
             }
         }
-
-        for _ in 0..pop_count {
-            self.open_elements.pop();
-        }
     }
 
-    /// Remove the given node_id from the open elements stack
+    /// Remove the given node_id from the open elements stack. Will do nothing when the node_id is not found
     fn open_elements_remove(&mut self, target_node_id: NodeId) {
         self.open_elements
             .retain(|&node_id| node_id != target_node_id);
@@ -1665,29 +1720,8 @@ impl<'stream> Html5Parser<'stream> {
     /// Create a new node that is not connected or attached to the document arena
     fn create_node(&self, token: &Token, namespace: &str) -> Node {
         match token {
-            Token::DocTypeToken {
-                name,
-                pub_identifier,
-                sys_identifier,
-                force_quirks: _,
-            } => {
-                let mut val = String::from("!DOCTYPE ");
-                val.push_str(
-                    name.as_ref()
-                        .unwrap_or(&"".to_string())
-                        .to_string()
-                        .as_str(),
-                );
-                if pub_identifier.is_some() || sys_identifier.is_some() {
-                    val.push_str(
-                        format!(
-                            " \"{}\" \"{}\"",
-                            pub_identifier.as_deref().unwrap_or(""),
-                            sys_identifier.as_deref().unwrap_or("")
-                        )
-                        .as_str(),
-                    );
-                }
+            Token::DocTypeToken { name, .. } => {
+                val = format!("!DOCTYPE {}", name.as_deref().unwrap_or(""),);
 
                 return Node::new_element(&self.document, val.as_str(), HashMap::new(), namespace);
             }
@@ -1707,24 +1741,26 @@ impl<'stream> Html5Parser<'stream> {
         }
     }
 
-    fn flush_pending_table_character_tokens(&mut self) {}
+    fn flush_pending_table_character_tokens(&mut self) {
+        todo!()
+    }
 
     /// This function will pop elements off the stack until it reaches the first element that matches
     /// our condition (which can be changed with the except and thoroughly parameters)
-    fn generate_all_implied_end_tags(&mut self, except: Option<&str>, thoroughly: bool) {
+    fn generate_implied_end_tags(&mut self, except: Option<&str>, thoroughly: bool) {
         loop {
             if self.open_elements.is_empty() {
                 return;
             }
 
-            let val = current_node!(self).name.clone();
+            let tag = current_node!(self).name.clone();
             if let Some(except) = except {
-                if except == val {
+                if except == tag {
                     return;
                 }
             }
 
-            if thoroughly && !["tbody", "td", "tfoot", "th", "thead", "tr"].contains(&val.as_str())
+            if thoroughly && !["tbody", "td", "tfoot", "th", "thead", "tr"].contains(&tag.as_str())
             {
                 return;
             }
@@ -1732,7 +1768,7 @@ impl<'stream> Html5Parser<'stream> {
             if ![
                 "dd", "dt", "li", "option", "optgroup", "p", "rb", "rp", "rt", "rtc",
             ]
-            .contains(&val.as_str())
+            .contains(&tag.as_str())
             {
                 return;
             }
@@ -1877,87 +1913,7 @@ impl<'stream> Html5Parser<'stream> {
         }
     }
 
-    // checks if the given element is in given scope
-    fn is_in_scope_new(&self, tag: &str, scope: Scope, node_id: Option<NodeId>) -> bool {
-        let namespace: String = if let Some(id) = node_id {
-            let node = get_node_by_id!(self.document, id);
-            node.namespace.clone().unwrap()
-        } else {
-            HTML_NAMESPACE.into()
-        };
-
-        for &id in self.open_elements.iter().rev() {
-            let node = get_node_by_id!(self.document, id);
-            if let Some(nid) = node_id {
-                let in_node = get_node_by_id!(self.document, nid);
-                if node.namespace == in_node.namespace && node.name == in_node.name {
-                    return true;
-                }
-            } else if node_id.is_none() {
-                if node.namespace == Some(namespace.clone()) && node.name == tag {
-                    return true;
-                }
-            } else {
-                match scope {
-                    Scope::Regular => {
-                        if SCOPE_ELEMENTS.contains(&node.name.as_str())
-                            && node.namespace == Some(HTML_NAMESPACE.into())
-                        {
-                            return false;
-                        }
-
-                        if ["mi", "mo", "mn", "ms", "mtext", "annotation-xml"]
-                            .contains(&node.name.as_str())
-                            && node.namespace == Some(MATHML_NAMESPACE.into())
-                        {
-                            return false;
-                        }
-
-                        if ["foreignObject", "desc", "title"].contains(&node.name.as_str())
-                            && node.namespace == Some(SVG_NAMESPACE.into())
-                        {
-                            return false;
-                        }
-                    }
-                    Scope::Button => {
-                        if (SCOPE_ELEMENTS.contains(&node.name.as_str())
-                            || "button" == node.name.as_str())
-                            && node.namespace == Some(HTML_NAMESPACE.into())
-                        {
-                            return false;
-                        }
-                    }
-                    Scope::ListItem => {
-                        if (SCOPE_ELEMENTS.contains(&node.name.as_str())
-                            || ["ol", "ul"].contains(&node.name.as_str()))
-                            && node.namespace == Some(HTML_NAMESPACE.into())
-                        {
-                            return false;
-                        }
-                    }
-                    Scope::Table => {
-                        if ["html", "table", "template"].contains(&node.name.as_str())
-                            && node.namespace == Some(HTML_NAMESPACE.into())
-                        {
-                            return false;
-                        }
-                    }
-                    Scope::Select => {
-                        // Note: NOT contains instead of contains
-                        if !(["optgroup", "option"].contains(&node.name.as_str())
-                            && node.namespace == Some(HTML_NAMESPACE.into()))
-                        {
-                            return false;
-                        }
-                    }
-                }
-            }
-        }
-
-        false
-    }
-
-    // Checks if the given element is in given scope
+    /// Checks if the given element is in given scope
     fn is_in_scope(&self, tag: &str, scope: Scope) -> bool {
         for &node_id in self.open_elements.iter().rev() {
             let node = get_node_by_id!(self.document, node_id).clone();
@@ -2015,10 +1971,9 @@ impl<'stream> Html5Parser<'stream> {
 
     /// Closes a table cell and switches the insertion mode to InRow
     fn close_cell(&mut self) {
-        self.generate_all_implied_end_tags(None, false);
+        self.generate_implied_end_tags(None, false);
 
-        let current_node = current_node!(self);
-        let tag = current_node.name.as_str();
+        let tag = current_node!(self).name;
         if tag != "td" && tag != "th" {
             self.parse_error("current node should be td or th");
         }
@@ -2041,17 +1996,18 @@ impl<'stream> Html5Parser<'stream> {
             Token::TextToken { .. } if self.current_token.is_empty_or_white() => {
                 self.reconstruct_formatting();
 
-                self.insert_character_element(&self.current_token.clone());
+                self.insert_characters(self.current_token.clone());
             }
             Token::TextToken { .. } => {
                 self.reconstruct_formatting();
 
-                self.insert_character_element(&self.current_token.clone());
+                self.insert_characters(self.current_token.clone());
 
                 self.frameset_ok = false;
             }
             Token::CommentToken { .. } => {
-                self.insert_comment(&self.current_token.clone(), None);
+                let node = self.create_node(&self.current_token, HTML_NAMESPACE);
+                self.insert_element_node(node);
             }
             Token::DocTypeToken { .. } => {
                 self.parse_error("doctype not allowed in in body insertion mode");
@@ -2096,8 +2052,8 @@ impl<'stream> Html5Parser<'stream> {
             Token::StartTagToken { name, .. } if name == "body" => {
                 self.parse_error("body tag not allowed in in body insertion mode");
 
-                if self.open_elements.len() == 1
-                    && open_elements_get!(self, NodeId::root().next().as_usize()).name != "body"
+                if self.open_elements.len() > 1
+                    || open_elements_get!(self, NodeId::root().next().as_usize()).name != "body"
                 {
                     // ignore token
                     return;
@@ -2262,14 +2218,15 @@ impl<'stream> Html5Parser<'stream> {
                 self.frameset_ok = false;
             }
             Token::StartTagToken { name, .. } if name == "form" => {
-                if self.form_element.is_some() && !self.open_elements_has("template") {
-                    self.parse_error("error with template, form shzzl");
-                    // ignore token
-                    return;
-                }
+                {
+                    if self.form_element.is_some() && !self.open_elements_has("template") {
+                        self.parse_error("error with template, form shzzl");
+                        // ignore token
+                    }
 
-                if self.is_in_scope("p", Scope::Button) {
-                    self.close_p_element();
+                    if self.is_in_scope("p", Scope::Button) {
+                        self.close_p_element();
+                    }
                 }
 
                 let node_id = self.insert_html_element(&self.current_token.clone());
@@ -2277,34 +2234,30 @@ impl<'stream> Html5Parser<'stream> {
                     self.form_element = Some(node_id);
                 }
             }
-            Token::StartTagToken { name, .. } if name == "li" || name == "dd" || name == "dt" => {
+            Token::StartTagToken { name, .. } if name == "li" => {
                 self.frameset_ok = false;
 
-                for idx in (0..self.open_elements.len()).rev() {
-                    let node_id = self.open_elements[idx];
-                    let node = get_node_by_id!(self.document, node_id).clone();
+                let mut idx = self.open_elements.len() - 1;
+                loop {
+                    let node = open_elements_get!(self, idx);
+                    let tag = node.name.clone();
 
-                    if node.name == name.as_str() {
-                        self.generate_all_implied_end_tags(Some(name.as_str()), false);
+                    if tag == "li" {
+                        self.generate_implied_end_tags(Some("li"), false);
 
-                        // It might be possible that the last item is not our node_id. Emit parse error if so
-                        if current_node!(self).id != node.id {
-                            self.parse_error("end tag not at top of stack");
+                        if current_node!(self).name != "li" {
+                            self.parse_error("li tag not at top of stack");
                         }
 
-                        // Pop until we reach the node.id
-                        while current_node!(self).id != node.id {
-                            self.open_elements.pop();
-                        }
-                        // Pop node_id as well
-                        self.open_elements.pop();
-
+                        self.pop_until("li");
                         break;
                     }
 
-                    if node.is_special() && ["address", "div", "p"].contains(&node.name.as_str()) {
+                    if !["address", "div", "p"].contains(&tag.as_str()) && node.is_special() {
                         break;
                     }
+
+                    idx -= 1;
                 }
 
                 if self.is_in_scope("p", Scope::Button) {
@@ -2313,9 +2266,33 @@ impl<'stream> Html5Parser<'stream> {
 
                 self.insert_html_element(&self.current_token.clone());
             }
-            // Token::StartTagToken { name, .. } if name == "dd" || name == "dt" => {
-            //
-            // }
+            Token::StartTagToken { name, .. } if name == "dd" || name == "dt" => {
+                self.frameset_ok = false;
+
+                let mut idx = self.open_elements.len() - 1;
+                loop {
+                    let node = open_elements_get!(self, idx);
+                    let tag = node.name.clone();
+
+                    if ["dd", "dt"].contains(&tag.as_str()) {
+                        self.generate_implied_end_tags(Some(tag.as_str()), false);
+                        self.open_elements.pop();
+                        break;
+                    }
+
+                    if !["address", "div", "p"].contains(&tag.as_str()) && node.is_special() {
+                        break;
+                    }
+
+                    idx -= 1;
+                }
+
+                if self.is_in_scope("p", Scope::Button) {
+                    self.close_p_element();
+                }
+
+                self.insert_html_element(&self.current_token.clone());
+            }
             Token::StartTagToken { name, .. } if name == "plaintext" => {
                 if self.is_in_scope("p", Scope::Button) {
                     self.close_p_element();
@@ -2328,7 +2305,7 @@ impl<'stream> Html5Parser<'stream> {
             Token::StartTagToken { name, .. } if name == "button" => {
                 if self.is_in_scope("button", Scope::Regular) {
                     self.parse_error("button tag not allowed in in body insertion mode");
-                    self.generate_all_implied_end_tags(None, false);
+                    self.generate_implied_end_tags(None, false);
                     self.pop_until("button");
                 }
 
@@ -2378,7 +2355,7 @@ impl<'stream> Html5Parser<'stream> {
                     return;
                 }
 
-                self.generate_all_implied_end_tags(None, false);
+                self.generate_implied_end_tags(None, false);
 
                 let cn = current_node!(self);
                 if cn.name != *name {
@@ -2399,7 +2376,7 @@ impl<'stream> Html5Parser<'stream> {
                     }
                     let node_id = node_id.expect("node_id");
 
-                    self.generate_all_implied_end_tags(None, false);
+                    self.generate_implied_end_tags(None, false);
 
                     let cn = current_node!(self);
                     if cn.name != *name {
@@ -2417,7 +2394,7 @@ impl<'stream> Html5Parser<'stream> {
                         return;
                     }
 
-                    self.generate_all_implied_end_tags(None, false);
+                    self.generate_implied_end_tags(None, false);
 
                     let cn = current_node!(self);
                     if cn.name != *name {
@@ -2448,7 +2425,7 @@ impl<'stream> Html5Parser<'stream> {
                     return;
                 }
 
-                self.generate_all_implied_end_tags(Some("li"), false);
+                self.generate_implied_end_tags(Some("li"), false);
 
                 if current_node!(self).name != *name {
                     self.parse_error("end tag not at top of stack");
@@ -2463,7 +2440,7 @@ impl<'stream> Html5Parser<'stream> {
                     return;
                 }
 
-                self.generate_all_implied_end_tags(Some(name), false);
+                self.generate_implied_end_tags(Some(name), false);
 
                 if current_node!(self).name != *name {
                     self.parse_error("end tag not at top of stack");
@@ -2491,7 +2468,7 @@ impl<'stream> Html5Parser<'stream> {
                     return;
                 }
 
-                self.generate_all_implied_end_tags(Some(name), false);
+                self.generate_implied_end_tags(Some(name), false);
 
                 if current_node!(self).name != *name {
                     self.parse_error("end tag not at top of stack");
@@ -2506,14 +2483,11 @@ impl<'stream> Html5Parser<'stream> {
             Token::StartTagToken { name, .. } if name == "a" => {
                 if let Some(node_id) = self.active_formatting_elements_has_until_marker("a") {
                     self.parse_error("a tag in active formatting elements");
-                    match self.run_adoption_agency(&self.current_token.clone()) {
-                        AdoptionResult::Completed => {}
-                        AdoptionResult::ProcessAsAnyOther => {
-                            // Remove from lists if not done already by the adoption agency
-                            self.open_elements_remove(node_id);
-                            self.active_formatting_elements_remove(node_id);
-                        }
-                    }
+                    self.run_adoption_agency(&self.current_token.clone());
+
+                    // Remove from lists if not done already by the adoption agency
+                    self.open_elements_remove(node_id);
+                    self.active_formatting_elements_remove(node_id);
                 }
 
                 self.reconstruct_formatting();
@@ -2545,17 +2519,8 @@ impl<'stream> Html5Parser<'stream> {
 
                 if self.is_in_scope("nobr", Scope::Regular) {
                     self.parse_error("nobr tag in scope");
-                    match self.run_adoption_agency(&self.current_token.clone()) {
-                        AdoptionResult::Completed => {}
-                        AdoptionResult::ProcessAsAnyOther => {
-                            any_other_end_tag = true;
-                        }
-                    }
-
-                    if !any_other_end_tag {
-                        // @todo: do we run this even when we run the adoption agency with out processAsAnyOther?
-                        self.reconstruct_formatting();
-                    }
+                    self.run_adoption_agency(&self.current_token.clone());
+                    self.reconstruct_formatting();
                 }
 
                 let node_id = self.insert_html_element(&self.current_token.clone());
@@ -2577,12 +2542,10 @@ impl<'stream> Html5Parser<'stream> {
                     || name == "tt"
                     || name == "u" =>
             {
-                match self.run_adoption_agency(&self.current_token.clone()) {
-                    AdoptionResult::Completed => {}
-                    AdoptionResult::ProcessAsAnyOther => {
-                        any_other_end_tag = true;
-                    }
-                }
+                self.run_adoption_agency(&self.current_token.clone());
+
+                #[cfg(feature = "debug_parser")]
+                self.display_debug_info();
             }
             Token::StartTagToken { name, .. }
                 if name == "applet" || name == "marquee" || name == "object" =>
@@ -2603,7 +2566,7 @@ impl<'stream> Html5Parser<'stream> {
                     return;
                 }
 
-                self.generate_all_implied_end_tags(None, false);
+                self.generate_implied_end_tags(None, false);
 
                 if current_node!(self).name != *name {
                     self.parse_error("end tag not at top of stack");
@@ -2671,7 +2634,6 @@ impl<'stream> Html5Parser<'stream> {
                 self.reconstruct_formatting();
 
                 self.insert_html_element(&self.current_token.clone());
-
                 self.open_elements.pop();
 
                 self.acknowledge_closing_tag(*is_self_closing);
@@ -2754,7 +2716,6 @@ impl<'stream> Html5Parser<'stream> {
                 self.reconstruct_formatting();
 
                 self.insert_html_element(&self.current_token.clone());
-
                 self.frameset_ok = false;
 
                 if self.insertion_mode == InsertionMode::InTable
@@ -2778,25 +2739,25 @@ impl<'stream> Html5Parser<'stream> {
             }
             Token::StartTagToken { name, .. } if name == "rb" || name == "rtc" => {
                 if self.is_in_scope("ruby", Scope::Regular) {
-                    self.generate_all_implied_end_tags(None, false);
+                    self.generate_implied_end_tags(None, false);
                 }
 
                 if current_node!(self).name != "ruby" {
                     self.parse_error("rb or rtc not in scope");
                 }
 
-                self.insert_foreign_element(&self.current_token.clone(), HTML_NAMESPACE.into());
+                self.insert_html_element(&self.current_token.clone());
             }
             Token::StartTagToken { name, .. } if name == "rp" || name == "rt" => {
                 if self.is_in_scope("ruby", Scope::Regular) {
-                    self.generate_all_implied_end_tags(Some("rtc"), false);
+                    self.generate_implied_end_tags(Some("rtc"), false);
                 }
 
                 if current_node!(self).name != "rtc" && current_node!(self).name != "ruby" {
                     self.parse_error("rp or rt not in scope");
                 }
 
-                self.insert_foreign_element(&self.current_token.clone(), HTML_NAMESPACE.into());
+                self.insert_html_element(&self.current_token.clone());
             }
             Token::StartTagToken {
                 name,
@@ -2866,49 +2827,8 @@ impl<'stream> Html5Parser<'stream> {
         }
 
         if any_other_end_tag {
-            let token_name = match self.current_token {
-                Token::EndTagToken { ref name, .. } => name.clone(),
-                _ => unreachable!(),
-            };
-
-            for idx in (0..self.open_elements.len()).rev() {
-                let node_id = self.open_elements[idx];
-                let node = get_node_by_id!(self.document, node_id).clone();
-
-                if node.name == token_name {
-                    self.generate_all_implied_end_tags(Some(node.name.as_str()), false);
-
-                    // It might be possible that the last item is not our node_id. Emit parse error if so
-                    if current_node!(self).id != node.id {
-                        self.parse_error("end tag not at top of stack");
-                    }
-
-                    // Pop until we reach the node.id
-                    while current_node!(self).id != node.id {
-                        self.open_elements.pop();
-                    }
-                    // Pop node_id as well
-                    self.open_elements.pop();
-
-                    break;
-                }
-
-                if node.is_special() {
-                    self.parse_error("special node");
-                    // ignore token
-                    return;
-                }
-            }
+            self.handle_in_body_any_other_end_tag();
         }
-    }
-
-    fn add_node(&mut self, node: Node) {
-        if let NodeData::Element(_) = node.data {
-            panic!("cannot use add_node() for element nodes, use insert_html_element() instead")
-        }
-
-        let node_id = current_node!(self).id;
-        self.document.get_mut().add_node(node, node_id);
     }
 
     /// Handle insertion mode "in_head"
@@ -2917,10 +2837,11 @@ impl<'stream> Html5Parser<'stream> {
 
         match &self.current_token {
             Token::TextToken { .. } if self.current_token.is_empty_or_white() => {
-                self.insert_character_element(&self.current_token.clone());
+                self.insert_characters(self.current_token.clone());
             }
             Token::CommentToken { .. } => {
-                self.insert_comment(&self.current_token.clone(), None);
+                let node = self.create_node(&self.current_token, HTML_NAMESPACE);
+                self.insert_element_node(node);
             }
             Token::DocTypeToken { .. } => {
                 self.parse_error("doctype not allowed in before head insertion mode");
@@ -2966,19 +2887,19 @@ impl<'stream> Html5Parser<'stream> {
                 self.insertion_mode = InsertionMode::InHeadNoscript;
             }
             Token::StartTagToken { name, .. } if name == "script" => {
-                let adjusted_insert_location = self.adjusted_insert_location(None);
+                let mut adjusted_insert_location = self.adjusted_insert_location(None);
                 let node = self.create_node(&self.current_token, HTML_NAMESPACE);
 
                 // TODO Set the element's parser document to the Document, and set the element's force async to false.
                 // TODO If parser is created as part of HTML fragment parsing algorithm, set the element's "already started" flag to true
                 // TODO if the parser was invoked by document.write/writln, set script's element already started flag to true
-                match adjusted_insert_location {
-                    InsertionPoint::LastChild(nodeid) => {
-                        let node_id = self.document.add_node(node, nodeid);
-                        self.open_elements.push(node_id);
-                    }
-                    _ => {}
-                }
+
+                let node_id = adjusted_insert_location.handle.add_node(
+                    node,
+                    adjusted_insert_location.node_id,
+                    adjusted_insert_location.position,
+                );
+                self.open_elements.push(node_id);
 
                 self.tokenizer.state = State::ScriptDataState;
                 self.original_insertion_mode = self.insertion_mode;
@@ -3017,7 +2938,7 @@ impl<'stream> Html5Parser<'stream> {
                     return;
                 }
 
-                self.generate_all_implied_end_tags(None, true);
+                self.generate_implied_end_tags(None, true);
 
                 if current_node!(self).name != "template" {
                     self.parse_error("template end tag not at top of stack");
@@ -3125,144 +3046,6 @@ impl<'stream> Html5Parser<'stream> {
         }
     }
 
-    /// hanlde tokens in foreign content
-    fn handle_in_foreign_content(&mut self) {
-        match &self.current_token {
-            Token::EofToken { .. } => {
-                // TODO What?
-            }
-            Token::TextToken { .. } if self.current_token.is_null() => {
-                self.parse_error("null character not allowed in in body insertion mode");
-                if let Token::TextToken { value, .. } = &mut self.current_token {
-                    *value = CHAR_REPLACEMENT.to_string();
-                }
-            }
-            Token::TextToken { .. } if self.current_token.is_empty_or_white() => {
-                self.insert_character_element(&self.current_token.clone());
-            }
-            Token::TextToken { .. } => {
-                self.insert_character_element(&self.current_token.clone());
-                self.frameset_ok = false;
-            }
-            Token::CommentToken { .. } => {
-                self.insert_comment(&self.current_token.clone(), None);
-            }
-            Token::DocTypeToken { .. } => {
-                self.parse_error("doctype not allowed in in body insertion mode");
-                // ignore token
-            }
-            Token::StartTagToken { name, .. }
-                if [
-                    "b",
-                    "big",
-                    "blockquote",
-                    "body",
-                    "br",
-                    "center",
-                    "code",
-                    "dd",
-                    "div",
-                    "dl",
-                    "dt",
-                    "em",
-                    "embed",
-                    "h1",
-                    "h2",
-                    "h3",
-                    "h4",
-                    "h5",
-                    "h6",
-                    "head",
-                    "hr",
-                    "i",
-                    "img",
-                    "li",
-                    "listing",
-                    "menu",
-                    "meta",
-                    "nobr",
-                    "ol",
-                    "p",
-                    "pre",
-                    "ruby",
-                    "s",
-                    "small",
-                    "span",
-                    "strong",
-                    "strike",
-                    "sub",
-                    "sup",
-                    "table",
-                    "tt",
-                    "u",
-                    "ul",
-                    "var",
-                ]
-                .contains(&name.as_str()) =>
-            {
-                self.parse_error("current token not allowed in foreign content");
-
-                self.reprocess_token = true
-            }
-            Token::StartTagToken {
-                name, attributes, ..
-            } if name == "font"
-                && (attributes.contains_key("color")
-                    || attributes.contains_key("face")
-                    || attributes.contains_key("size")) =>
-            {
-                self.parse_error("current token not allowed in foreign content");
-
-                self.reprocess_token = true
-            }
-            Token::EndTagToken { name, .. } if name == "br" || name == "p" => {
-                self.parse_error("current token not allowed in foreign content");
-
-                self.reprocess_token = true
-            }
-            Token::StartTagToken {
-                name,
-                is_self_closing,
-                attributes,
-            } => {
-                let node = current_node!(self);
-                let mut token = Token::StartTagToken {
-                    name: name.clone(),
-                    attributes: attributes.clone(),
-                    is_self_closing: *is_self_closing,
-                };
-                if node.namespace == Some(MATHML_NAMESPACE.into()) {
-                    self.adjust_mathml_attributes(&mut token);
-                } else if node.namespace == Some(SVG_NAMESPACE.into()) {
-                    self.adjust_svg_tag_name(&mut token);
-                    self.adjust_svg_attributes(&mut token);
-                }
-
-                self.adjust_foreign_attributes(&mut token);
-                // self.insert_foreign_element(&token, &node.namespace);
-                if *is_self_closing {
-                    if name == "script"
-                        && current_node!(self).namespace == Some(SVG_NAMESPACE.into())
-                    {
-                        self.acknowledge_closing_tag(*is_self_closing);
-                        self.open_elements.pop();
-                        // TODO
-                    } else {
-                        self.open_elements.pop();
-                        self.acknowledge_closing_tag(*is_self_closing);
-                    }
-                }
-            }
-            Token::EndTagToken { name, .. }
-                if name == "script" && current_node!(self).name == "script" =>
-            {
-                self.open_elements.pop();
-                // TODO
-            }
-            Token::EndTagToken { .. } => {}
-        }
-    }
-
     /// Handle insertion mode "in_table"
     fn handle_in_table(&mut self) {
         let mut anything_else = false;
@@ -3279,7 +3062,9 @@ impl<'stream> Html5Parser<'stream> {
                 self.reprocess_token = true;
             }
             Token::CommentToken { .. } => {
-                self.insert_comment(&self.current_token.clone(), None);
+                let node = self.create_node(&self.current_token, HTML_NAMESPACE);
+                let parent_id = current_node!(self).id;
+                self.document.get_mut().add_node(node, parent_id, None);
             }
             Token::DocTypeToken { .. } => {
                 self.parse_error("doctype not allowed in in table insertion mode");
@@ -3432,10 +3217,10 @@ impl<'stream> Html5Parser<'stream> {
                 // ignore token
             }
             Token::TextToken { .. } => {
-                self.insert_character_element(&self.current_token.clone());
+                self.insert_characters(self.current_token.clone());
             }
             Token::CommentToken { .. } => {
-                self.insert_comment(&self.current_token.clone(), None);
+                self.insert_html_element(&self.current_token.clone());
             }
             Token::DocTypeToken { .. } => {
                 self.parse_error("doctype not allowed in in select insertion mode");
@@ -3598,7 +3383,7 @@ impl<'stream> Html5Parser<'stream> {
         }
     }
 
-    /// Remove the given node_id from the active formatting elements list
+    /// Remove the given node_id from the active formatting elements list. Will do nothing when the node is not found
     fn active_formatting_elements_remove(&mut self, target_node_id: NodeId) {
         self.active_formatting_elements
             .retain(|node_id| match node_id {
@@ -3724,14 +3509,9 @@ impl<'stream> Html5Parser<'stream> {
         let mut new_node = org_node.clone();
         new_node.children = Vec::new();
         new_node.parent = None;
+        new_node.is_registered = false;
 
-        let parent_id = current_node!(self).id;
-        let new_node_id = self.document.get_mut().add_node(new_node, parent_id);
-        if let NodeData::Element { .. } = org_node.data {
-            self.open_elements.push(new_node_id);
-        }
-
-        new_node_id
+        self.insert_element_node(new_node)
     }
 
     fn stop_parsing(&self) {
@@ -3740,7 +3520,7 @@ impl<'stream> Html5Parser<'stream> {
 
     /// Close the p element that may or may not be on the open elements stack
     fn close_p_element(&mut self) {
-        self.generate_all_implied_end_tags(Some("p"), false);
+        self.generate_implied_end_tags(Some("p"), false);
 
         if current_node!(self).name != "p" {
             self.parse_error("p element not at top of stack");
@@ -3811,79 +3591,29 @@ impl<'stream> Html5Parser<'stream> {
         }
     }
 
-    fn insert_comment(&mut self, token: &Token, parent: Option<NodeId>) -> NodeId {
-        let insert_location = if parent.is_none() {
-            self.adjusted_insert_location(None)
-        } else {
-            let node = get_node_by_id!(self.document, parent.unwrap());
-            self.adjusted_insert_location(Some(&node))
-        };
-        let node = self.create_node(token, HTML_NAMESPACE);
-        match insert_location {
-            InsertionPoint::LastChild(node_id) => {
-                let node_id = self.document.add_node(node, node_id);
-                node_id
-            }
-            _ => 0.into(),
-        }
-    }
-
-    fn insert_character_element(&mut self, token: &Token) {
-        let insert_location = self.adjusted_insert_location(None);
-        match insert_location {
-            InsertionPoint::LastChild(node_id) => {
-                let parent_node = get_node_by_id!(self.document, node_id);
-                if let Some(last_child_id) = parent_node.children.last() {
-                    let mut doc_mut = self.document.get_mut();
-                    let last_child = doc_mut
-                        .get_node_by_id_mut(*last_child_id)
-                        .expect("node not found");
-                    if let NodeData::Text(TextData { ref mut value, .. }) = &mut last_child.data {
-                        value.push_str(&token.to_string());
-                        return;
-                    }
-                }
-                let node = self.create_node(token, HTML_NAMESPACE);
-                self.document.add_node(node, node_id);
-            }
-            InsertionPoint::BeforeSibing(_nodeid) => {},
-            InsertionPoint::TableForsterParenting { curren, prev } => {
-                let node = get_node_by_id!(self.document, curren);
-                if node.parent.is_some() {
-                    let _node = self.create_node(token, HTML_NAMESPACE);
-
-                } else {
-                    let node = self.create_node(token, HTML_NAMESPACE);
-                    self.document.add_node(node, prev);
-                }
-            }
-        }
-    }
-
-    fn insert_html_document(&mut self, token: &Token) -> NodeId {
-        let node = self.create_node(token, HTML_NAMESPACE);
-
-        let node_id = self.document.get_mut().add_node(node, 0.into());
-        self.open_elements.push(node_id);
-        node_id
-    }
-
+    /// Creates a HTML node based on the token, and inserts the node into the document tree
     fn insert_html_element(&mut self, token: &Token) -> NodeId {
         // TODO fixed default namespace is wrong
         self.insert_foreign_element(token, Some(HTML_NAMESPACE))
     }
 
+    /// Creates a unspecified node based on the token, and inserts the node into the document tree
     fn insert_foreign_element(&mut self, token: &Token, namespace: Option<&str>) -> NodeId {
-        let adjusted_insert_location = self.adjusted_insert_location(None);
+        let node = self.create_node(token, namespace.unwrap_or(HTML_NAMESPACE));
 
-        let mut node = self.create_node(token, namespace.unwrap_or(HTML_NAMESPACE));
+        self.insert_element_node(node)
+    }
+
+    /// Inserts an existing node into the document tree
+    fn insert_element_node(&mut self, mut node: Node) -> NodeId {
+        let mut adjusted_insert_location = self.adjusted_insert_location(None);
 
         // add CSS classes from class attribute in element
         // e.g., <div class="one two three">
         // TODO: this will be refactored later in ElementAttributes to do this
         // when inserting a "class" attribute. Similar to "id" to attach it to the DOM
         // named_id_list. Although this will require some shared pointers
-        if let NodeData::Element(element) = &mut node.data {
+        if let NodeData::Element(ref mut element) = node.data {
             if element.attributes.contains("class") {
                 if let Some(class_string) = element.attributes.get("class") {
                     element.classes = ElementClass::from_string(class_string);
@@ -3891,14 +3621,28 @@ impl<'stream> Html5Parser<'stream> {
             }
         }
 
-        match adjusted_insert_location {
-            InsertionPoint::LastChild(node_id) => {
-                let node_id = self.document.add_node(node, node_id);
-                self.open_elements.push(node_id);
-                node_id
-            }
-            _ => 0.into(),
-        }
+        // if parent_id is possible to insert element  (for instance: document already has child element etc)
+        //    if parser not created  as part of html fragmentparsing algorithm
+        //      push new element queue onto relevant agent custom element reactions stack (???)
+
+        //   insert element into adjusted_insert_location
+        let node_id = adjusted_insert_location.handle.get_mut().add_node(
+            // @TODO: is this correct to clone the &node?
+            node.clone(),
+            adjusted_insert_location.node_id,
+            adjusted_insert_location.position,
+        );
+
+        node.id = node_id;
+
+        //     if parser not created as part of html fragment parsing algorithm
+        //       pop the top element queue from the relevant agent custom element reactions stack (???)
+
+        // push element onto the stack of open elements so that is the new current node
+        self.open_elements.push(node_id);
+
+        // return element
+        node_id
     }
 
     /// Switch the parser and tokenizer to the RAWTEXT state
@@ -3921,34 +3665,37 @@ impl<'stream> Html5Parser<'stream> {
         self.insertion_mode = InsertionMode::Text;
     }
 
-    fn adjusted_insert_location(&self, override_node: Option<&Node>) -> InsertionPoint<NodeId> {
+    fn adjusted_insert_location(&self, override_node: Option<&Node>) -> NodeInsertLocation {
         let current_node = current_node!(self);
-        let target = override_node.unwrap_or(&current_node);
-        if !(self.foster_parenting
-            && ["table", "tbody", "thead", "tfoot", "tr"].contains(&target.name.as_str()))
+        let target = match override_node {
+            Some(node) => node,
+            None => &current_node,
+        };
+
+        let insert_location = if self.foster_parenting
+            && ["table", "tbody", "thead", "tfoot", "tr"].contains(&target.name.as_str())
         {
-            if target.name == "template" {
-                // TODO
-                return InsertionPoint::LastChild(0.into());
-            } else {
-                return InsertionPoint::LastChild(target.id);
+            self.find_table_insertion_location()
+        } else {
+            NodeInsertLocation::new(Document::clone(&self.document), target.id, None)
+        };
+
+        let node = get_node_by_id!(insert_location.handle, insert_location.node_id);
+        if node.parent.is_some() {
+            let parent_node = get_node_by_id!(insert_location.handle, node.parent.unwrap());
+
+            if parent_node.name == "template" {
+                if let NodeData::Element(element) = parent_node.data {
+                    return NodeInsertLocation::new(
+                        element.template_contents.unwrap().doc,
+                        NodeId::root(),
+                        None,
+                    );
+                }
             }
         }
 
-        let mut iter = self.open_elements.iter().rev().peekable();
-        while let Some(nodeid) = iter.next() {
-            let node = get_node_by_id!(self.document, *nodeid);
-            if node.name == "template" {
-                return InsertionPoint::LastChild(0.into());
-            } else if node.name == "table" {
-                return InsertionPoint::TableForsterParenting {
-                    curren: *nodeid,
-                    prev: *(*iter.peek().unwrap()),
-                };
-            }
-        }
-
-        InsertionPoint::LastChild(self.open_elements[0])
+        insert_location
     }
 
     fn find_table_insertion_location(&self) -> NodeInsertLocation {
@@ -4011,49 +3758,21 @@ impl<'stream> Html5Parser<'stream> {
         if let Some(parent_node_id) = last_table_node.parent {
             // Find the table node in the children of the parent, since we need to insert before this node
             let parent_node = get_node_by_id!(self.document, parent_node_id);
-            let table_node_idx = parent_node
+            let child_idx = parent_node
                 .children
                 .iter()
-                .rev()
-                .position(|&node_id| node_id == last_table_node_id.unwrap())
+                .position(|&node_id| node_id == last_table_node.id)
                 .expect("table node not found in parent node children");
 
-            // Find in the children the node-id, and we should it it there..
             return NodeInsertLocation::new(
                 Document::clone(&self.document),
-                last_table_node.parent.unwrap(),
-                Some(table_node_idx),
+                parent_node_id,
+                Some(child_idx),
             );
         }
 
-        let _last_table_idx = self.open_elements.iter().rev().position(|node_id| {
-            let node = get_node_by_id!(self.document, *node_id);
-            node.name == "table"
-        });
-
-        let previous_element = self.open_elements[last_table_node_idx.unwrap() + 1];
+        let previous_element = self.open_elements[last_table_node_idx.unwrap() - 1];
         NodeInsertLocation::new(Document::clone(&self.document), previous_element, None)
-    }
-
-    /// Merges the text with the last child of the current node if that is also a text node
-    fn create_or_merge_text(&mut self, token: Token) {
-        let node = current_node!(self);
-
-        if let Some(last_child_id) = node.children.last() {
-            let mut doc_mut = self.document.get_mut();
-            let last_child = doc_mut
-                .get_node_by_id_mut(*last_child_id)
-                .expect("node not found");
-            // let last_child = get_node_by_id_mut!(self.document, *last_child_id);
-            if let NodeData::Text(TextData { ref mut value, .. }) = last_child.data {
-                value.push_str(&token.to_string());
-                return;
-            }
-        }
-
-        let node = self.create_node(&self.current_token, HTML_NAMESPACE);
-        let parent_id = current_node!(self).id;
-        self.document.get_mut().add_node(node, parent_id);
     }
 
     #[cfg(feature = "debug_parser")]
@@ -4061,7 +3780,7 @@ impl<'stream> Html5Parser<'stream> {
         println!("-----------------------------------------\n");
         self.document.get().print_nodes();
         println!("-----------------------------------------\n");
-        println!("current token   : {}", self.current_token);
+        println!("current token   : '{}'", self.current_token);
         println!("insertion mode  : {:?}", self.insertion_mode);
         print!("Open elements   : [ ");
         for node_id in &self.open_elements {
@@ -4078,7 +3797,7 @@ impl<'stream> Html5Parser<'stream> {
                     print!("({}) {}, ", node_id, node.name);
                 }
                 ActiveElement::Marker => {
-                    print!("marker");
+                    print!("marker, ");
                 }
             }
         }
@@ -4089,17 +3808,142 @@ impl<'stream> Html5Parser<'stream> {
 
         std::io::stdout().flush().ok();
     }
+
+    /// Handles and other end tag as found during the in-body insertion mode. This needs to be a
+    /// separate function as this is also called during the adoption agency algorithm
+    fn handle_in_body_any_other_end_tag(&mut self) {
+        if self.open_elements.is_empty() {
+            self.parse_error("no open elements");
+            // ignore token
+            return;
+        }
+
+        let token_name = match self.current_token {
+            Token::EndTagToken { ref name, .. } => name.clone(),
+            _ => unreachable!(),
+        };
+
+        for idx in (0..self.open_elements.len()).rev() {
+            let node_id = self.open_elements[idx];
+            let node = get_node_by_id!(self.document, node_id).clone();
+
+            if node.name == token_name {
+                self.generate_implied_end_tags(Some(node.name.as_str()), false);
+
+                // It might be possible that the last item is not our node_id. Emit parse error if so
+                if current_node!(self).id != node.id {
+                    self.parse_error("end tag not at top of stack");
+                }
+
+                // Pop until we reach the node.id
+                while current_node!(self).id != node.id {
+                    self.open_elements.pop();
+                }
+                // Pop node_id as well
+                self.open_elements.pop();
+
+                break;
+            }
+
+            if node.is_special() {
+                self.parse_error("special node");
+                // ignore token
+                return;
+            }
+        }
+    }
+
+    /// Inserts characters
+    fn insert_characters(&mut self, token: Token) {
+        let adjusted_insert_location = self.adjusted_insert_location(None);
+
+        let parent_node = get_node_by_id!(self.document, adjusted_insert_location.node_id);
+        if let NodeData::Document { .. } = parent_node.data {
+            // value is dropped, as we cannot add text to the document node
+            return;
+        }
+
+        // If we don't have any children, or we need to add in front, we never need to merge
+        if parent_node.children.is_empty() || Some(0) == adjusted_insert_location.position {
+            // The child node we need to insert after is not a text, so just add the text
+            let node = self.create_node(&self.current_token, HTML_NAMESPACE);
+            self.document.get_mut().add_node(node, parent_node.id, None);
+
+            return;
+        }
+
+        let child_idx = if adjusted_insert_location.position.is_none() {
+            parent_node.children.len()
+        } else {
+            adjusted_insert_location.position.unwrap()
+        };
+
+        // Check if the child we need to insert after is a text, is so, merge the texts
+        if let Some(insert_after_id) = parent_node.children.get(child_idx - 1) {
+            let mut doc_mut = self.document.get_mut();
+            let insert_after_node = doc_mut
+                .get_node_by_id_mut(*insert_after_id)
+                .expect("node not found");
+            if let NodeData::Text(TextData { ref mut value, .. }) = insert_after_node.data {
+                value.push_str(&token.to_string());
+                return;
+            }
+        }
+
+        // The child node we need to insert after is not a text, so just add the text
+        let node = self.create_node(&self.current_token, HTML_NAMESPACE);
+        self.document.get_mut().add_node(node, parent_node.id, None);
+    }
+
+    /// Fetches the next token from the tokenizer. However, if the token is a text token AND
+    /// it starts with one or more whitespaces, the token is split into 2 tokens: the whitespace part
+    /// and the remainder.
+    fn fetch_next_token(&mut self) -> Token {
+        // If there are no tokens to fetch, fetch the next token from the tokenizer
+        if self.token_queue.is_empty() {
+            let token = self.tokenizer.next_token().expect("tokenizer error");
+
+            if let Token::TextToken { value } = token {
+                // check if the token needs splitting
+                let first_non_whitespace_position =
+                    value.chars().position(|c| !c.is_whitespace()).unwrap_or(0);
+
+                if first_non_whitespace_position > 0 {
+                    self.token_queue.push(Token::TextToken {
+                        value: value[0..first_non_whitespace_position].to_string(),
+                    });
+
+                    self.token_queue.push(Token::TextToken {
+                        value: value[first_non_whitespace_position..].to_string(),
+                    });
+                } else {
+                    self.token_queue.push(Token::TextToken { value });
+                }
+            } else {
+                // Simply return the token
+                return token;
+            }
+        }
+
+        let token = self.token_queue.get(0).cloned();
+        self.token_queue.remove(0);
+
+        token.expect("no token found")
+    }
 }
 
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::html5_parser::input_stream::Encoding;
+    use crate::html5::input_stream::Encoding;
 
     macro_rules! node_create {
         ($self:expr, $name:expr) => {{
             let node = Node::new_element(&$self.document, $name, HashMap::new(), HTML_NAMESPACE);
-            let node_id = $self.document.get_mut().add_node(node, NodeId::root());
+            let node_id = $self
+                .document
+                .get_mut()
+                .add_node(node, NodeId::root(), None);
             $self.open_elements.push(node_id);
         }};
     }

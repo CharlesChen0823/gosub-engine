@@ -111,7 +111,9 @@
 //! ;
 //! ```
 //!
+pub mod new_tokenizer;
 pub mod node;
 pub mod parser;
 pub mod tokenizer;
 pub mod tokens;
+pub mod unicode;
