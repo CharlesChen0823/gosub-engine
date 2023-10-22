@@ -332,14 +332,14 @@ impl<'stream> Html5Parser<'stream> {
                 };
 
             // step 4.9
-            let common_ancestor = self.open_elements[format_ele_stack_position - 1].clone();
+            let common_ancestor = self.open_elements[format_ele_stack_position - 1];
 
             // step 4.10
-            let mut bookmark_node_id = BookMark::Replace(format_elem_node_id.clone());
+            let mut bookmark_node_id = BookMark::Replace(format_elem_node_id);
 
             // step 4.11
             let mut node_id;
-            let mut last_node_id = further_block_node_id.clone();
+            let mut last_node_id = further_block_node_id;
             let mut node_idx = further_block_idx;
 
             // step 4.12
@@ -352,7 +352,7 @@ impl<'stream> Html5Parser<'stream> {
 
                 // step 4.13.2
                 node_idx -= 1;
-                node_id = self.open_elements[node_idx].clone();
+                node_id = self.open_elements[node_idx];
 
                 // step 4.13.3
                 if node_id == format_elem_node_id {
@@ -390,15 +390,15 @@ impl<'stream> Html5Parser<'stream> {
                 let replace_node_id = self.document.get_mut().add_new_node(replacement_node);
 
                 self.active_formatting_elements[node_active_position] =
-                    ActiveElement::Node(replace_node_id).clone();
+                    ActiveElement::Node(replace_node_id);
 
-                self.open_elements[node_idx] = replace_node_id.clone();
+                self.open_elements[node_idx] = replace_node_id;
 
-                node_id = replace_node_id.clone();
+                node_id = replace_node_id;
 
                 // step 4.13.7
                 if last_node_id == further_block_node_id {
-                    bookmark_node_id = BookMark::InsertAfter(node_id.clone());
+                    bookmark_node_id = BookMark::InsertAfter(node_id);
                 }
 
                 // step 4.13.8
@@ -407,7 +407,7 @@ impl<'stream> Html5Parser<'stream> {
                     .attach_node_to_parent(last_node_id, replace_node_id, None);
 
                 // step 4.13.9
-                last_node_id = node_id.clone();
+                last_node_id = node_id;
             }
 
             // step 4.14
