@@ -5,6 +5,7 @@ mod quirks;
 // ------------------------------------------------------------
 
 use self::document::DocumentHandle;
+use std::fmt::{self, Debug, Formatter};
 
 use super::node::NodeId;
 use crate::html5::element_class::ElementClass;
@@ -167,6 +168,19 @@ enum ActiveElement {
     Marker,
 }
 
+impl Debug for ActiveElement {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            ActiveElement::Marker => {
+                write!(f, "marker")
+            }
+            ActiveElement::Node(node_id) => {
+                write!(f, "{:?}", node_id)
+            }
+        }
+    }
+}
+
 impl ActiveElement {
     fn node_id(&self) -> Option<NodeId> {
         match self {
@@ -299,7 +313,10 @@ impl<'stream> Html5Parser<'stream> {
                 break;
             }
 
-            // println!("Token: {}", self.current_token);
+            // println!(
+            //     "Token: {}, self.insertion_mode: {:?}",
+            //     self.current_token, self.insertion_mode
+            // );
 
             match self.insertion_mode {
                 InsertionMode::Initial => {
@@ -1437,7 +1454,10 @@ impl<'stream> Html5Parser<'stream> {
                         }
                         Token::CommentToken { .. } => {
                             let html_node_id = self.open_elements.first().unwrap_or_default();
-                            self.insert_comment_element(&self.current_token.clone(), Some(*html_node_id));
+                            self.insert_comment_element(
+                                &self.current_token.clone(),
+                                Some(*html_node_id),
+                            );
                         }
                         Token::DocTypeToken { .. } => {
                             self.parse_error("doctype not allowed in after body insertion mode");
@@ -1558,7 +1578,10 @@ impl<'stream> Html5Parser<'stream> {
                 }
                 InsertionMode::AfterAfterBody => match &self.current_token {
                     Token::CommentToken { .. } => {
-                        self.insert_comment_element(&self.current_token.clone(), Some(NodeId::root()));
+                        self.insert_comment_element(
+                            &self.current_token.clone(),
+                            Some(NodeId::root()),
+                        );
                     }
                     Token::DocTypeToken { .. } => {
                         self.handle_in_body();
@@ -1583,7 +1606,10 @@ impl<'stream> Html5Parser<'stream> {
                 InsertionMode::AfterAfterFrameset => {
                     match &self.current_token {
                         Token::CommentToken { .. } => {
-                            self.insert_comment_element(&self.current_token.clone(), Some(NodeId::root()));
+                            self.insert_comment_element(
+                                &self.current_token.clone(),
+                                Some(NodeId::root()),
+                            );
                         }
                         Token::DocTypeToken { .. } => {
                             self.handle_in_body();

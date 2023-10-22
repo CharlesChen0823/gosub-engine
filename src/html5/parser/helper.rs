@@ -13,13 +13,18 @@ pub enum InsertionPositionMode<NodeId> {
     Sibling { parent: NodeId, before: NodeId },
 }
 
+pub enum BookMark<NodeId> {
+    Replace(NodeId),
+    InsertAfter(NodeId),
+}
+
 impl<'stream> Html5Parser<'stream> {
     fn current_node_id(&self) -> &NodeId {
         self.open_elements.last().unwrap_or_default()
     }
 
     fn current_node(&self) -> Node {
-        let current_node_id = self.current_node_id().clone();
+        let current_node_id = *self.current_node_id();
         self.document
             .get()
             .get_node_by_id(current_node_id)
@@ -50,14 +55,16 @@ impl<'stream> Html5Parser<'stream> {
             .iter()
             .enumerate()
             .rev()
-            .filter(|&(_, x)| match x {
-                ActiveElement::Marker => false,
-                ActiveElement::Node(node_id) => self.get_node_id(node_id).name == subject,
-            })
-            .next()
-            .map(|(i, x)| match x {
-                ActiveElement::Marker => panic!("not reached"),
-                ActiveElement::Node(node_id) => (i, node_id.clone()),
+            .find_map(|(i, &x)| {
+                if let ActiveElement::Node(node_id) = x {
+                    if self.get_node_id(&node_id).name == subject {
+                        Some((i, node_id))
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                }
             })
     }
 
@@ -66,9 +73,13 @@ impl<'stream> Html5Parser<'stream> {
             .iter()
             .enumerate()
             .skip(format_ele_position)
-            .filter(|&(_, x)| self.get_node_id(x).is_special())
-            .next()
-            .map(|(i, x)| (i, x.clone()))
+            .find_map(|(i, &x)| {
+                if self.get_node_id(&x).is_special() {
+                    Some((i, x))
+                } else {
+                    None
+                }
+            })
     }
 
     /// node_type true is for text node, false if other
@@ -83,12 +94,21 @@ impl<'stream> Html5Parser<'stream> {
             InsertionPositionMode::Sibling { parent, before } => {
                 let parent_node = self.get_node_id(&parent).clone();
                 let position = parent_node.children.iter().position(|&x| x == before);
+                if position.is_none() {
+                    panic!("should not reached????????");
+                }
                 if !node_type {
                     self.document.attach_node_to_parent(node, parent, position);
                 } else {
                     if position.is_some() {
+                        let position = position.unwrap();
+                        if position == 0 {
+                            self.document
+                                .attach_node_to_parent(node, parent, Some(position));
+                            return;
+                        }
                         // TODO add 1 or not ?
-                        let last_node_id = parent_node.children[position.unwrap()];
+                        let last_node_id = parent_node.children[position - 1];
                         if let NodeData::Text(TextData { ref mut value, .. }) = self
                             .document
                             .get_mut()
@@ -99,7 +119,8 @@ impl<'stream> Html5Parser<'stream> {
                             value.push_str(&token.unwrap().to_string());
                             return;
                         };
-                        self.document.attach_node_to_parent(node, parent, position);
+                        self.document
+                            .attach_node_to_parent(node, parent, Some(position - 1));
                         return;
                     }
                     self.document.attach_node_to_parent(node, parent, position);
@@ -226,11 +247,11 @@ impl<'stream> Html5Parser<'stream> {
                 if node.parent.is_some() {
                     return InsertionPositionMode::Sibling {
                         parent: node.parent.unwrap(),
-                        before: node_id.clone(),
+                        before: *node_id,
                     };
                 }
                 // TODO has some question? can reached?
-                return InsertionPositionMode::LastChild((*iter.peek().unwrap()).clone());
+                return InsertionPositionMode::LastChild(*(*iter.peek().unwrap()));
             }
         }
         return InsertionPositionMode::LastChild(*self.open_elements.first().unwrap());
@@ -242,7 +263,7 @@ impl<'stream> Html5Parser<'stream> {
             Token::StartTagToken { name, .. } | Token::EndTagToken { name, .. } => name,
             _ => panic!("un reached"),
         };
-        let current_node_id = self.current_node_id().clone();
+        let current_node_id = *self.current_node_id();
 
         // step 2
         if self.current_node().name == *subject
@@ -311,14 +332,14 @@ impl<'stream> Html5Parser<'stream> {
                 };
 
             // step 4.9
-            let common_ancestor = self.open_elements[format_ele_stack_position - 1];
+            let common_ancestor = self.open_elements[format_ele_stack_position - 1].clone();
 
             // step 4.10
-            let mut bookmark = format_elem_idx;
+            let mut bookmark_node_id = BookMark::Replace(format_elem_node_id.clone());
 
             // step 4.11
-            let mut node_id = further_block_node_id;
-            let mut last_node_id = further_block_node_id;
+            let mut node_id;
+            let mut last_node_id = further_block_node_id.clone();
             let mut node_idx = further_block_idx;
 
             // step 4.12
@@ -331,7 +352,7 @@ impl<'stream> Html5Parser<'stream> {
 
                 // step 4.13.2
                 node_idx -= 1;
-                node_id = self.open_elements[node_idx];
+                node_id = self.open_elements[node_idx].clone();
 
                 // step 4.13.3
                 if node_id == format_elem_node_id {
@@ -367,29 +388,26 @@ impl<'stream> Html5Parser<'stream> {
                     HTML_NAMESPACE,
                 );
                 let replace_node_id = self.document.get_mut().add_new_node(replacement_node);
-                self.document.get_mut().attach_node_to_parent(
-                    replace_node_id,
-                    common_ancestor,
-                    None,
-                );
 
                 self.active_formatting_elements[node_active_position] =
-                    ActiveElement::Node(replace_node_id);
+                    ActiveElement::Node(replace_node_id).clone();
 
-                self.open_elements[node_idx] = replace_node_id;
+                self.open_elements[node_idx] = replace_node_id.clone();
 
-                node_id = replace_node_id;
+                node_id = replace_node_id.clone();
 
                 // step 4.13.7
                 if last_node_id == further_block_node_id {
-                    bookmark = node_active_position + 1;
+                    bookmark_node_id = BookMark::InsertAfter(node_id.clone());
                 }
 
                 // step 4.13.8
-                self.document.relocate(last_node_id, node_id);
+                self.document.detach_node_from_parent(last_node_id);
+                self.document
+                    .attach_node_to_parent(last_node_id, replace_node_id, None);
 
                 // step 4.13.9
-                node_id = last_node_id;
+                last_node_id = node_id.clone();
             }
 
             // step 4.14
@@ -406,7 +424,7 @@ impl<'stream> Html5Parser<'stream> {
             );
 
             // step 4.16
-            let node_id = self
+            let new_node_id = self
                 .document
                 .get_mut()
                 .add_new_node(new_format_node.clone());
@@ -417,27 +435,38 @@ impl<'stream> Html5Parser<'stream> {
                 .expect("node not found")
                 .clone();
             for child in further_block_node.children.iter() {
-                self.document.get_mut().relocate(*child, node_id);
+                self.document.get_mut().relocate(*child, new_node_id);
             }
 
             // step 4.17
             self.document
                 .get_mut()
-                .attach_node_to_parent(node_id, further_block_node_id, None);
+                .attach_node_to_parent(new_node_id, further_block_node_id, None);
 
             // step 4.18
-            self.active_formatting_elements
-                .insert(bookmark, ActiveElement::Node(node_id));
-            let position = self.position_in_active_format(&format_elem_node_id);
-            self.active_formatting_elements.remove(position.unwrap());
+            match bookmark_node_id {
+                BookMark::Replace(current) => {
+                    let index = self
+                        .position_in_active_format(&current)
+                        .expect("node not found");
+                    self.active_formatting_elements[index] = ActiveElement::Node(new_node_id);
+                }
+                BookMark::InsertAfter(previous) => {
+                    let index = self
+                        .position_in_active_format(&previous)
+                        .expect("node not foudn")
+                        + 1;
+                    self.active_formatting_elements
+                        .insert(index, ActiveElement::Node(new_node_id));
+                    let position = self.position_in_active_format(&format_elem_node_id);
+                    self.active_formatting_elements.remove(position.unwrap());
+                }
+            }
 
             // step 4.19
-            self.open_elements.retain(|x| x == &format_elem_node_id);
-            let position = self
-                .position_in_open_element(&further_block_node_id);
-            if position.is_some() {
-            self.open_elements.insert(position.unwrap(), node_id);
-            }
+            self.open_elements.retain(|x| x != &format_elem_node_id);
+            let position = self.position_in_open_element(&further_block_node_id).unwrap();
+            self.open_elements.insert(position + 1, new_node_id);
         }
     }
 }
