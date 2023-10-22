@@ -226,31 +226,7 @@ impl Document {
     /// Inserts a node to the parent node at the given position in the children (or none
     /// to add at the end). Will automatically register the node if not done so already
     pub fn add_node(&mut self, node: Node, parent_id: NodeId, position: Option<usize>) -> NodeId {
-        let mut node_named_id: Option<String> = None;
-        if let NodeData::Element(element) = &node.data {
-            if let Some(named_id) = element.attributes.get("id") {
-                node_named_id = Some(named_id.clone());
-            }
-        }
-
-        // Register the node if needed
-        let node_id = if !node.is_registered {
-            self.arena.register_node(node)
-        } else {
-            node.id
-        };
-
-        // TODO: this will also be removed like above note
-        if let Some(named_id) = node_named_id {
-            self.set_node_named_id(node_id, &named_id);
-        }
-
-        // update the node's ID (it uses default ID when first created)
-        if let Some(node) = self.get_node_by_id_mut(node_id) {
-            if let NodeData::Element(element) = &mut node.data {
-                element.set_id(node_id);
-            }
-        }
+        let node_id = self.add_new_node(node);
 
         self.attach_node_to_parent(node_id, parent_id, position);
 
