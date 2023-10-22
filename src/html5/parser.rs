@@ -2854,7 +2854,7 @@ impl<'stream> Html5Parser<'stream> {
                 let insert_position = self.appropriate_place_insert(None);
                 let node = self.create_node(&self.current_token.clone(), HTML_NAMESPACE);
                 let node_id = self.document.get_mut().add_new_node(node);
-                self.insert_helper(node_id, insert_position, false, None);
+                self.insert_element_helper(node_id, insert_position);
 
                 // TODO Set the element's parser document to the Document, and set the element's force async to false.
                 // TODO If parser is created as part of HTML fragment parsing algorithm, set the element's "already started" flag to true
@@ -3282,7 +3282,7 @@ impl<'stream> Html5Parser<'stream> {
 
         let node_id = self.document.get_mut().add_new_node(new_node);
         let insert_position = self.appropriate_place_insert(None);
-        self.insert_helper(node_id, insert_position, false, None);
+        self.insert_element_helper(node_id, insert_position);
 
         //     if parser not created as part of html fragment parsing algorithm
         //       pop the top element queue from the relevant agent custom element reactions stack (???)
