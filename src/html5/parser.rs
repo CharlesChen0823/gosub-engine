@@ -2036,7 +2036,10 @@ impl<'stream> Html5Parser<'stream> {
                 }
 
                 // Add attributes to html element
-                if let NodeData::Element(element) = &mut current_node_mut!(self).data {
+                let node_id = self.open_elements.first().unwrap().clone();
+                let mut doc = self.document.get_mut();
+                let first_element = doc.get_node_by_id_mut(node_id).expect("node not found");
+                if let NodeData::Element(element) = &mut first_element.data {
                     for (key, value) in attributes {
                         if !element.attributes.contains(key) {
                             element.attributes.insert(key, value);
