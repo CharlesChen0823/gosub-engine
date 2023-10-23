@@ -481,7 +481,7 @@ impl<'stream> Html5Parser<'stream> {
                             self.handle_in_body();
                         }
                         Token::EndTagToken { name, .. } if name == "noscript" => {
-                            self.pop_check("no_script");
+                            self.pop_check("noscript");
                             self.check_last_element("head");
                             self.insertion_mode = InsertionMode::InHead;
                         }
@@ -562,16 +562,8 @@ impl<'stream> Html5Parser<'stream> {
                         }
                         Token::StartTagToken { name, .. }
                             if [
-                                "base",
-                                "basefont",
-                                "bgsound",
-                                "link",
-                                "meta",
-                                "noframes",
-                                "script",
-                                "style",
-                                "template",
-                                "title",
+                                "base", "basefont", "bgsound", "link", "meta", "noframes",
+                                "script", "style", "template", "title",
                             ]
                             .contains(&name.as_str()) =>
                         {
@@ -723,11 +715,22 @@ impl<'stream> Html5Parser<'stream> {
                     }
                 }
                 InsertionMode::InCaption => {
-                    let mut process_incaption_body = false;
-
                     match &self.current_token {
                         Token::EndTagToken { name, .. } if name == "caption" => {
-                            process_incaption_body = true;
+                            if !self.open_elements_has("caption") {
+                                self.parse_error(
+                                    "caption end tag not allowed in in caption insertion mode",
+                                );
+                                continue;
+                            }
+                            if current_node!(self).name != "caption" {
+                                self.parse_error("caption end tag not at top of stack");
+                            }
+
+                            self.pop_until("caption");
+                            self.active_formatting_elements_clear_until_marker();
+
+                            self.insertion_mode = InsertionMode::InTable;
                         }
                         Token::StartTagToken { name, .. }
                             if [
@@ -736,11 +739,37 @@ impl<'stream> Html5Parser<'stream> {
                             ]
                             .contains(&name.as_str()) =>
                         {
-                            process_incaption_body = true;
+                            if !self.open_elements_has("caption") {
+                                self.parse_error(
+                                    "caption end tag not allowed in in caption insertion mode",
+                                );
+                                continue;
+                            }
+                            if current_node!(self).name != "caption" {
+                                self.parse_error("caption end tag not at top of stack");
+                            }
+
+                            self.pop_until("caption");
+                            self.active_formatting_elements_clear_until_marker();
+
+                            self.insertion_mode = InsertionMode::InTable;
                             self.reprocess_token = true;
                         }
                         Token::EndTagToken { name, .. } if name == "table" => {
-                            process_incaption_body = true;
+                            if !self.open_elements_has("caption") {
+                                self.parse_error(
+                                    "caption end tag not allowed in in caption insertion mode",
+                                );
+                                continue;
+                            }
+                            if current_node!(self).name != "caption" {
+                                self.parse_error("caption end tag not at top of stack");
+                            }
+
+                            self.pop_until("caption");
+                            self.active_formatting_elements_clear_until_marker();
+
+                            self.insertion_mode = InsertionMode::InTable;
                             self.reprocess_token = true;
                         }
                         Token::EndTagToken { name, .. }
@@ -759,31 +788,6 @@ impl<'stream> Html5Parser<'stream> {
                             // ignore token
                         }
                         _ => self.handle_in_body(),
-                    }
-
-                    if process_incaption_body {
-                        if !self.open_elements_has("caption") {
-                            self.parse_error(
-                                "caption end tag not allowed in in caption insertion mode",
-                            );
-                            // ignore token
-                            self.reprocess_token = false;
-                            continue;
-
-                            // @TODO: check what fragment case means
-                        }
-
-                        self.generate_implied_end_tags(None, false);
-
-                        if current_node!(self).name != "caption" {
-                            self.parse_error("caption end tag not at top of stack");
-                            continue;
-                        }
-
-                        self.pop_until("caption");
-                        self.active_formatting_elements_clear_until_marker();
-
-                        self.insertion_mode = InsertionMode::InTable;
                     }
                 }
                 InsertionMode::InColumnGroup => {
@@ -3454,8 +3458,8 @@ impl<'stream> Html5Parser<'stream> {
             let mut new_attributes = HashMap::new();
             for (name, value) in attributes.iter() {
                 if XML_ADJUSTMENTS.contains_key(name) {
-                    let new_name = SVG_ADJUSTMENTS.get(name).expect("svg adjustments");
-                    new_attributes.insert(new_name.to_string(), value.clone());
+                    let new_name = XML_ADJUSTMENTS.get(name).expect("xml adjustments");
+                    new_attributes.insert(format!("{} {}", new_name.0, new_name.1), value.clone());
                 } else {
                     new_attributes.insert(name.clone(), value.clone());
                 }
