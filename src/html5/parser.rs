@@ -110,17 +110,6 @@ macro_rules! current_node {
     }};
 }
 
-macro_rules! current_node_mut {
-    ($self:expr) => {{
-        let current_node_idx = $self.open_elements.last().unwrap_or_default();
-        $self
-            .document
-            .get_mut()
-            .get_node_by_id_mut(*current_node_idx)
-            .expect("Current node not found")
-    }};
-}
-
 macro_rules! open_elements_get {
     ($self:expr, $idx:expr) => {{
         $self
