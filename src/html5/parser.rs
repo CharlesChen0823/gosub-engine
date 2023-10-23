@@ -723,6 +723,7 @@ impl<'stream> Html5Parser<'stream> {
                                 );
                                 continue;
                             }
+                            self.generate_implied_end_tags(None, false);
                             if current_node!(self).name != "caption" {
                                 self.parse_error("caption end tag not at top of stack");
                             }
@@ -745,6 +746,7 @@ impl<'stream> Html5Parser<'stream> {
                                 );
                                 continue;
                             }
+                            self.generate_implied_end_tags(None, false);
                             if current_node!(self).name != "caption" {
                                 self.parse_error("caption end tag not at top of stack");
                             }
@@ -762,6 +764,7 @@ impl<'stream> Html5Parser<'stream> {
                                 );
                                 continue;
                             }
+                            self.generate_implied_end_tags(None, false);
                             if current_node!(self).name != "caption" {
                                 self.parse_error("caption end tag not at top of stack");
                             }

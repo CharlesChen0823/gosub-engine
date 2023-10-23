@@ -3,7 +3,7 @@ use crate::{
     html5::{
         error_logger::ParseError,
         input_stream::InputStream,
-        node::{NodeData, NodeId},
+        node::{NodeData, NodeId, MATHML_NAMESPACE, SVG_NAMESPACE},
         parser::{
             document::{Document, DocumentHandle},
             Html5Parser,
@@ -202,14 +202,31 @@ impl Test {
         let mut next_expected_idx = document_offset_id;
 
         let node = document.get_node_by_id(node_idx).unwrap();
+        let namespace = node.namespace.clone().unwrap_or("".to_string());
 
         let node_result = match &node.data {
             NodeData::Element(element) => {
-                let actual = format!(
-                    "|{}<{}>",
-                    " ".repeat((indent as usize * 2) + 1),
-                    element.name()
-                );
+                let actual = if [SVG_NAMESPACE, MATHML_NAMESPACE].contains(&namespace.as_str()) {
+                    if namespace == SVG_NAMESPACE {
+                        format!(
+                            "|{}<svg {}>",
+                            " ".repeat((indent as usize * 2) + 1),
+                            element.name()
+                        )
+                    } else {
+                        format!(
+                            "|{}<math {}>",
+                            " ".repeat((indent as usize * 2) + 1),
+                            element.name()
+                        )
+                    }
+                } else {
+                    format!(
+                        "|{}<{}>",
+                        " ".repeat((indent as usize * 2) + 1),
+                        element.name()
+                    )
+                };
                 let expected = self.document[next_expected_idx as usize].to_owned();
                 next_expected_idx += 1;
 
