@@ -7,10 +7,8 @@ const DISABLED_CASES: &[&str] = &[
     // tests2.dat
     "<!DOCTYPE html><frameset> te st",
     "<!DOCTYPE html><frameset></frameset> te st",
-    "<!DOCTYPE html><dt><div><dd>",
     "<!DOCTYPE html><table><tr>TEST",
     "<!doctypehtml><scrIPt type=text/x-foobar;baz>X</SCRipt",
-    "<!DOCTYPE html><select><optgroup><option></optgroup><option><select><option>",
     "testtest",
     r#"<!DOCTYPE html><body><title>X</title><meta name=z><link rel=foo><style>x { content:"</style" } </style>"#,
     "<!DOCTYPE html><script></script>  <title>x</title>  </head>",
@@ -28,12 +26,6 @@ const DISABLED_CASES: &[&str] = &[
     "<!DOCTYPE html><pre>&#x0a;&#x0a;A</pre>",
     "<!DOCTYPE html><textarea>foo</textarea>",
     "<p><table></table>",
-    // tests5.dat
-    "<style> <!-- </style> --> </style>x",
-    "<script> <!-- </script> --> </script>x",
-    "<title> <!-- </title> --> </title>x",
-    "<textarea> <!--- </textarea>->x</textarea> --> </textarea>x",
-    "<noscript><!--</noscript>--></noscript>",
     // tests6.dat
     "<body><div>",
     "<frameset></frameset><noframes>",

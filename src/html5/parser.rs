@@ -1622,6 +1622,11 @@ impl<'stream> Html5Parser<'stream> {
         Ok(self.error_logger.borrow().get_errors().clone())
     }
 
+    /// Enables or disables scripting
+    pub fn enabled_scripting(&mut self, enabled: bool) {
+        self.scripting_enabled = enabled;
+    }
+
     fn acknowledge_closing_tag(&mut self, is_self_closing: bool) {
         if is_self_closing {
             self.ack_self_closing = true;
