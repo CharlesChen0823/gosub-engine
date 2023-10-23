@@ -715,23 +715,11 @@ impl<'stream> Html5Parser<'stream> {
                     }
                 }
                 InsertionMode::InCaption => {
+                    let mut process_incaption_body = false;
+                    let mut reprocess_token_in_caption_body = false;
                     match &self.current_token {
                         Token::EndTagToken { name, .. } if name == "caption" => {
-                            if !self.open_elements_has("caption") {
-                                self.parse_error(
-                                    "caption end tag not allowed in in caption insertion mode",
-                                );
-                                continue;
-                            }
-                            self.generate_implied_end_tags(None, false);
-                            if current_node!(self).name != "caption" {
-                                self.parse_error("caption end tag not at top of stack");
-                            }
-
-                            self.pop_until("caption");
-                            self.active_formatting_elements_clear_until_marker();
-
-                            self.insertion_mode = InsertionMode::InTable;
+                            process_incaption_body = true;
                         }
                         Token::StartTagToken { name, .. }
                             if [
@@ -740,40 +728,12 @@ impl<'stream> Html5Parser<'stream> {
                             ]
                             .contains(&name.as_str()) =>
                         {
-                            if !self.open_elements_has("caption") {
-                                self.parse_error(
-                                    "caption end tag not allowed in in caption insertion mode",
-                                );
-                                continue;
-                            }
-                            self.generate_implied_end_tags(None, false);
-                            if current_node!(self).name != "caption" {
-                                self.parse_error("caption end tag not at top of stack");
-                            }
-
-                            self.pop_until("caption");
-                            self.active_formatting_elements_clear_until_marker();
-
-                            self.insertion_mode = InsertionMode::InTable;
-                            self.reprocess_token = true;
+                            process_incaption_body = true;
+                            reprocess_token_in_caption_body = true;
                         }
                         Token::EndTagToken { name, .. } if name == "table" => {
-                            if !self.open_elements_has("caption") {
-                                self.parse_error(
-                                    "caption end tag not allowed in in caption insertion mode",
-                                );
-                                continue;
-                            }
-                            self.generate_implied_end_tags(None, false);
-                            if current_node!(self).name != "caption" {
-                                self.parse_error("caption end tag not at top of stack");
-                            }
-
-                            self.pop_until("caption");
-                            self.active_formatting_elements_clear_until_marker();
-
-                            self.insertion_mode = InsertionMode::InTable;
-                            self.reprocess_token = true;
+                            process_incaption_body = true;
+                            reprocess_token_in_caption_body = true;
                         }
                         Token::EndTagToken { name, .. }
                             if name == "body"
@@ -791,6 +751,28 @@ impl<'stream> Html5Parser<'stream> {
                             // ignore token
                         }
                         _ => self.handle_in_body(),
+                    }
+
+                    if process_incaption_body {
+                        if !self.open_elements_has("caption") {
+                            self.parse_error(
+                                "caption end tag not allowed in in caption insertion mode",
+                            );
+                            continue;
+                        }
+                        self.generate_implied_end_tags(None, false);
+                        if current_node!(self).name != "caption" {
+                            self.parse_error("caption end tag not at top of stack");
+                        }
+
+                        self.pop_until("caption");
+                        self.active_formatting_elements_clear_until_marker();
+
+                        self.insertion_mode = InsertionMode::InTable;
+
+                        if reprocess_token_in_caption_body {
+                            self.reprocess_token = true;
+                        }
                     }
                 }
                 InsertionMode::InColumnGroup => {
