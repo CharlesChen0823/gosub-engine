@@ -2622,7 +2622,7 @@ impl<'stream> Html5Parser<'stream> {
                 self.acknowledge_closing_tag(*is_self_closing);
 
                 if !attributes.contains_key("type")
-                    || attributes.get("type") != Some(&String::from("hidden"))
+                    || attributes.get("type").unwrap().to_lowercase() != *"hidden"
                 {
                     self.frameset_ok = false;
                 }
