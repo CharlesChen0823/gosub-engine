@@ -296,10 +296,10 @@ impl<'stream> Html5Parser<'stream> {
                 break;
             }
 
-            // println!(
-            //     "Token: {}, self.insertion_mode: {:?}",
-            //     self.current_token, self.insertion_mode
-            // );
+            println!(
+                "Token: {}, self.insertion_mode: {:?}",
+                self.current_token, self.insertion_mode
+            );
 
             match self.insertion_mode {
                 InsertionMode::Initial => {
@@ -2365,6 +2365,7 @@ impl<'stream> Html5Parser<'stream> {
                     if node_id != cn.id {
                         self.parse_error("end tag not at top of stack");
                     }
+                    self.open_elements.pop();
                 } else {
                     if !self.is_in_scope(name, Scope::Regular) {
                         self.parse_error("end tag not in scope");
