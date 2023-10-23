@@ -1718,10 +1718,23 @@ impl<'stream> Html5Parser<'stream> {
 
     /// Create a new node that is not connected or attached to the document arena
     fn create_node(&self, token: &Token, namespace: &str) -> Node {
-        let val: String;
         match token {
-            Token::DocTypeToken { name, .. } => {
-                val = format!("!DOCTYPE {}", name.as_deref().unwrap_or(""),);
+            Token::DocTypeToken {
+                name,
+                pub_identifier,
+                sys_identifier,
+                ..
+            } => {
+                let val = if pub_identifier.is_some() || sys_identifier.is_some() {
+                    format!(
+                        "!DOCTYPE {} \"{}\" \"{}\"",
+                        name.as_deref().unwrap_or(""),
+                        pub_identifier.as_deref().unwrap_or(""),
+                        sys_identifier.as_deref().unwrap_or("")
+                    )
+                } else {
+                    format!("!DOCTYPE {}", name.as_deref().unwrap_or(""),)
+                };
 
                 return Node::new_element(&self.document, val.as_str(), HashMap::new(), namespace);
             }
@@ -2189,15 +2202,14 @@ impl<'stream> Html5Parser<'stream> {
                 self.frameset_ok = false;
             }
             Token::StartTagToken { name, .. } if name == "form" => {
-                {
-                    if self.form_element.is_some() && !self.open_elements_has("template") {
-                        self.parse_error("error with template, form shzzl");
-                        // ignore token
-                    }
+                if self.form_element.is_some() && !self.open_elements_has("template") {
+                    self.parse_error("error with template, form shzzl");
+                    // ignore token
+                    return;
+                }
 
-                    if self.is_in_scope("p", Scope::Button) {
-                        self.close_p_element();
-                    }
+                if self.is_in_scope("p", Scope::Button) {
+                    self.close_p_element();
                 }
 
                 let node_id = self.insert_html_element(&self.current_token.clone());

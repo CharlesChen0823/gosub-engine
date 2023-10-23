@@ -27,7 +27,6 @@ const DISABLED_CASES: &[&str] = &[
     "<!DOCTYPE html><html><head></head><body><pre>x<div>y</pre></body></html>",
     "<!DOCTYPE html><pre>&#x0a;&#x0a;A</pre>",
     "<!DOCTYPE html><textarea>foo</textarea>",
-    "<!DOCTYPE html><html><head></head><body><ul><li><div><p><li></ul></body></html>",
     "<p><table></table>",
     // tests5.dat
     "<style> <!-- </style> --> </style>x",
@@ -38,7 +37,6 @@ const DISABLED_CASES: &[&str] = &[
     // tests6.dat
     "<body><div>",
     "<frameset></frameset><noframes>",
-    "<form><form>",
     "</caption><div>",
     "</table><div>",
     "</table></tbody></tfoot></thead></tr><div>",
@@ -51,7 +49,6 @@ const DISABLED_CASES: &[&str] = &[
     "<caption><col><colgroup><tbody><tfoot><thead><tr>",
     "</table><tr>",
     "<body></body></html>",
-    r#"<!DOCTYPE html PUBLIC "-//W3C//DTD HTML 4.01//EN"><html></html>"#,
     "<param><frameset></frameset>",
     "<source><frameset></frameset>",
     "<track><frameset></frameset>",
