@@ -8,6 +8,7 @@ use std::collections::HashMap;
 const ADOPTION_AGENCY_OUTER_LOOP_DEPTH: usize = 8;
 const ADOPTION_AGENCY_INNER_LOOP_DEPTH: usize = 3;
 
+#[derive(Debug)]
 pub enum InsertionPositionMode<NodeId> {
     LastChild(NodeId),
     Sibling { parent: NodeId, before: NodeId },

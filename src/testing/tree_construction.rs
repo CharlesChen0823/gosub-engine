@@ -3,7 +3,7 @@ use crate::{
     html5::{
         error_logger::ParseError,
         input_stream::InputStream,
-        node::{NodeData, NodeId},
+        node::{NodeData, NodeId, MATHML_NAMESPACE, SVG_NAMESPACE},
         parser::{
             document::{Document, DocumentHandle},
             Html5Parser,
@@ -45,6 +45,8 @@ pub struct Test {
     pub document: Vec<String>,
     /// fragment
     document_fragment: Vec<String>,
+    /// Scripting should be enabled
+    scripting_enabled: bool,
 }
 
 pub enum NodeResult {
@@ -182,6 +184,8 @@ impl Test {
         is.read_from_str(self.data.as_str(), None);
 
         let mut parser = Html5Parser::new(&mut is);
+        parser.enabled_scripting(self.scripting_enabled);
+
         let document = Document::shared();
         let parse_errors = parser.parse(Document::clone(&document))?;
 
@@ -202,14 +206,31 @@ impl Test {
         let mut next_expected_idx = document_offset_id;
 
         let node = document.get_node_by_id(node_idx).unwrap();
+        let namespace = node.namespace.clone().unwrap_or("".to_string());
 
         let node_result = match &node.data {
             NodeData::Element(element) => {
-                let actual = format!(
-                    "|{}<{}>",
-                    " ".repeat((indent as usize * 2) + 1),
-                    element.name()
-                );
+                let actual = if [SVG_NAMESPACE, MATHML_NAMESPACE].contains(&namespace.as_str()) {
+                    if namespace == SVG_NAMESPACE {
+                        format!(
+                            "|{}<svg {}>",
+                            " ".repeat((indent as usize * 2) + 1),
+                            element.name()
+                        )
+                    } else {
+                        format!(
+                            "|{}<math {}>",
+                            " ".repeat((indent as usize * 2) + 1),
+                            element.name()
+                        )
+                    }
+                } else {
+                    format!(
+                        "|{}<{}>",
+                        " ".repeat((indent as usize * 2) + 1),
+                        element.name()
+                    )
+                };
                 let expected = self.document[next_expected_idx as usize].to_owned();
                 next_expected_idx += 1;
 
@@ -378,6 +399,7 @@ pub fn fixture_from_path(path: &PathBuf) -> Result<FixtureFile> {
         file_path: path.to_str().unwrap().to_string(),
         line: 1,
         data: "".to_string(),
+        scripting_enabled: true,
         errors: vec![],
         document: vec![],
         document_fragment: vec![],
@@ -392,7 +414,7 @@ pub fn fixture_from_path(path: &PathBuf) -> Result<FixtureFile> {
                 || !current_test.errors.is_empty()
                 || !current_test.document.is_empty()
             {
-                current_test.data = current_test.data.trim_end_matches("\n").to_string();
+                current_test.data = current_test.data.strip_suffix('\n').unwrap().to_string();
                 tests.push(current_test);
                 current_test = Test {
                     file_path: path.to_str().unwrap().to_string(),
@@ -401,10 +423,18 @@ pub fn fixture_from_path(path: &PathBuf) -> Result<FixtureFile> {
                     errors: vec![],
                     document: vec![],
                     document_fragment: vec![],
+                    scripting_enabled: true,
                 };
             }
             section = Some("data");
         } else if line.starts_with('#') {
+            if line.as_str() == "#script-off" {
+                current_test.scripting_enabled = false;
+            }
+            if line.as_str() == "#script-on" {
+                current_test.scripting_enabled = true;
+            }
+
             section = match line.as_str() {
                 "#errors" => Some("errors"),
                 "#document" => Some("document"),
@@ -413,10 +443,8 @@ pub fn fixture_from_path(path: &PathBuf) -> Result<FixtureFile> {
         } else if let Some(sec) = section {
             match sec {
                 "data" => {
-                    if !current_test.data.is_empty() {
-                        current_test.data.push_str("\n");
-                    }
-                    current_test.data.push_str(&line)
+                    current_test.data.push_str(&line);
+                    current_test.data.push('\n');
                 }
                 "errors" => {
                     let re = Regex::new(r"\((?P<line>\d+),(?P<col>\d+)\): (?P<code>.+)").unwrap();
@@ -430,8 +458,8 @@ pub fn fixture_from_path(path: &PathBuf) -> Result<FixtureFile> {
                 }
                 "document" => {
                     let length = current_test.document.len();
-                    if length > 1 && !line.starts_with("|") && line != "" {
-                        current_test.document[length - 1].push_str("\n");
+                    if length > 1 && !line.starts_with('|') && !line.is_empty() {
+                        current_test.document[length - 1].push('\n');
                         current_test.document[length - 1].push_str(&line);
                     } else {
                         current_test.document.push(line)
@@ -448,7 +476,7 @@ pub fn fixture_from_path(path: &PathBuf) -> Result<FixtureFile> {
         || !current_test.errors.is_empty()
         || !current_test.document.is_empty()
     {
-        current_test.data = current_test.data.trim_end_matches("\n").to_string();
+        current_test.data = current_test.data.strip_suffix('\n').unwrap().to_string();
         tests.push(current_test);
     }
 
