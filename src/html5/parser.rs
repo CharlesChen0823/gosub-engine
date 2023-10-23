@@ -3065,7 +3065,7 @@ impl<'stream> Html5Parser<'stream> {
                 attributes,
             } if name == "input" => {
                 if !attributes.contains_key("type")
-                    || attributes.get("type") == Some(&String::from("hidden"))
+                    || attributes.get("type").unwrap().to_lowercase() != String::from("hidden")
                 {
                     anything_else = true;
                 } else {
