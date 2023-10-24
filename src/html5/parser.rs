@@ -11,7 +11,7 @@ use crate::html5::error_logger::{ErrorLogger, ParseError, ParserError};
 use crate::html5::input_stream::InputStream;
 use crate::html5::node::{Node, NodeData, HTML_NAMESPACE, MATHML_NAMESPACE, SVG_NAMESPACE};
 use crate::html5::parser::attr_replacements::{
-    MATHML_ADJUSTMENTS, XML_ADJUSTMENTS, SVG_ADJUSTMENTS_TAG, SVG_ADJUSTMENTS_ATTRIBUTES,
+    MATHML_ADJUSTMENTS, SVG_ADJUSTMENTS_ATTRIBUTES, SVG_ADJUSTMENTS_TAG, XML_ADJUSTMENTS,
 };
 use crate::html5::parser::document::{Document, DocumentFragment, DocumentType};
 use crate::html5::parser::quirks::QuirksMode;
@@ -211,6 +211,9 @@ pub struct Html5Parser<'stream> {
     /// Keeps the position of where any document.write() should be inserted when running a script
     insertion_point: Option<usize>,
 
+    // ignore the next token is LF
+    ignore_lf: bool,
+
     // Sometimes tokens needs to be split up (and it seems the tokenizer cannot do this?)
     token_queue: Vec<Token>,
 }
@@ -262,6 +265,7 @@ impl<'stream> Html5Parser<'stream> {
             script_nesting_level: 0,
             parser_pause_flag: false,
             insertion_point: None,
+            ignore_lf: false,
             token_queue: vec![],
         }
     }
@@ -279,6 +283,15 @@ impl<'stream> Html5Parser<'stream> {
                 self.current_token = self.fetch_next_token();
             }
             self.reprocess_token = false;
+
+            if self.ignore_lf {
+                if let Token::TextToken { value } = &self.current_token {
+                    if value.eq(&"\n") {
+                        self.current_token = self.fetch_next_token();
+                    }
+                }
+                self.ignore_lf = false;
+            }
 
             // Break when we reach the end of the token stream
             if self.current_token.is_eof() {
@@ -522,7 +535,7 @@ impl<'stream> Html5Parser<'stream> {
                     if anything_else {
                         self.parse_error("anything else not allowed in after head insertion mode");
 
-                        self.pop_check("no_script");
+                        self.pop_check("noscript");
                         self.check_last_element("head");
 
                         self.insertion_mode = InsertionMode::InHead;
@@ -680,10 +693,11 @@ impl<'stream> Html5Parser<'stream> {
                         }
                         _ => {
                             let tokens = self.pending_table_character_tokens.clone();
+                            self.pending_table_character_tokens.clear();
 
                             let mut process_as_intable_anything_else = false;
 
-                            for c in self.pending_table_character_tokens.chars() {
+                            for c in tokens.chars() {
                                 if !c.is_ascii_whitespace() {
                                     self.parse_error("non whitespace character in pending table character tokens");
                                     process_as_intable_anything_else = true;
@@ -703,7 +717,7 @@ impl<'stream> Html5Parser<'stream> {
                                 self.insert_text_element(&Token::TextToken { value: tokens });
                             }
 
-                            self.pending_table_character_tokens.clear();
+                            // self.pending_table_character_tokens.clear();
 
                             self.insertion_mode = self.original_insertion_mode;
                             self.reprocess_token = true;
@@ -711,23 +725,11 @@ impl<'stream> Html5Parser<'stream> {
                     }
                 }
                 InsertionMode::InCaption => {
+                    let mut process_incaption_body = false;
+                    let mut reprocess_token_in_caption_body = false;
                     match &self.current_token {
                         Token::EndTagToken { name, .. } if name == "caption" => {
-                            if !self.open_elements_has("caption") {
-                                self.parse_error(
-                                    "caption end tag not allowed in in caption insertion mode",
-                                );
-                                continue;
-                            }
-                            self.generate_implied_end_tags(None, false);
-                            if current_node!(self).name != "caption" {
-                                self.parse_error("caption end tag not at top of stack");
-                            }
-
-                            self.pop_until("caption");
-                            self.active_formatting_elements_clear_until_marker();
-
-                            self.insertion_mode = InsertionMode::InTable;
+                            process_incaption_body = true;
                         }
                         Token::StartTagToken { name, .. }
                             if [
@@ -736,40 +738,12 @@ impl<'stream> Html5Parser<'stream> {
                             ]
                             .contains(&name.as_str()) =>
                         {
-                            if !self.open_elements_has("caption") {
-                                self.parse_error(
-                                    "caption end tag not allowed in in caption insertion mode",
-                                );
-                                continue;
-                            }
-                            self.generate_implied_end_tags(None, false);
-                            if current_node!(self).name != "caption" {
-                                self.parse_error("caption end tag not at top of stack");
-                            }
-
-                            self.pop_until("caption");
-                            self.active_formatting_elements_clear_until_marker();
-
-                            self.insertion_mode = InsertionMode::InTable;
-                            self.reprocess_token = true;
+                            process_incaption_body = true;
+                            reprocess_token_in_caption_body = true;
                         }
                         Token::EndTagToken { name, .. } if name == "table" => {
-                            if !self.open_elements_has("caption") {
-                                self.parse_error(
-                                    "caption end tag not allowed in in caption insertion mode",
-                                );
-                                continue;
-                            }
-                            self.generate_implied_end_tags(None, false);
-                            if current_node!(self).name != "caption" {
-                                self.parse_error("caption end tag not at top of stack");
-                            }
-
-                            self.pop_until("caption");
-                            self.active_formatting_elements_clear_until_marker();
-
-                            self.insertion_mode = InsertionMode::InTable;
-                            self.reprocess_token = true;
+                            process_incaption_body = true;
+                            reprocess_token_in_caption_body = true;
                         }
                         Token::EndTagToken { name, .. }
                             if name == "body"
@@ -787,6 +761,28 @@ impl<'stream> Html5Parser<'stream> {
                             // ignore token
                         }
                         _ => self.handle_in_body(),
+                    }
+
+                    if process_incaption_body {
+                        if !self.open_elements_has("caption") {
+                            self.parse_error(
+                                "caption end tag not allowed in in caption insertion mode",
+                            );
+                            continue;
+                        }
+                        self.generate_implied_end_tags(None, false);
+                        if current_node!(self).name != "caption" {
+                            self.parse_error("caption end tag not at top of stack");
+                        }
+
+                        self.pop_until("caption");
+                        self.active_formatting_elements_clear_until_marker();
+
+                        self.insertion_mode = InsertionMode::InTable;
+
+                        if reprocess_token_in_caption_body {
+                            self.reprocess_token = true;
+                        }
                     }
                 }
                 InsertionMode::InColumnGroup => {
@@ -2036,7 +2032,7 @@ impl<'stream> Html5Parser<'stream> {
                 }
 
                 // Add attributes to html element
-                let node_id = self.open_elements.first().unwrap().clone();
+                let node_id = *self.open_elements.first().unwrap();
                 let mut doc = self.document.get_mut();
                 let first_element = doc.get_node_by_id_mut(node_id).expect("node not found");
                 if let NodeData::Element(element) = &mut first_element.data {
@@ -2229,6 +2225,7 @@ impl<'stream> Html5Parser<'stream> {
                 self.insert_html_element(&self.current_token.clone());
 
                 // @TODO: Next token is LF, ignore and move on to the next one
+                self.ignore_lf = true;
 
                 self.frameset_ok = false;
             }
@@ -2656,7 +2653,7 @@ impl<'stream> Html5Parser<'stream> {
                 self.acknowledge_closing_tag(*is_self_closing);
 
                 if !attributes.contains_key("type")
-                    || attributes.get("type") != Some(&String::from("hidden"))
+                    || attributes.get("type").unwrap().to_lowercase() != *"hidden"
                 {
                     self.frameset_ok = false;
                 }
@@ -2703,6 +2700,7 @@ impl<'stream> Html5Parser<'stream> {
                 self.insert_html_element(&self.current_token.clone());
 
                 // @TODO: if next token == LF, ignore and move on to the next one
+                self.ignore_lf = true;
 
                 self.tokenizer.state = State::RcDataState;
                 self.original_insertion_mode = self.insertion_mode;
@@ -2987,9 +2985,15 @@ impl<'stream> Html5Parser<'stream> {
     /// Handle insertion mode "in_template"
     fn handle_in_template(&mut self) {
         match &self.current_token {
-            Token::TextToken { .. } => self.handle_in_body(),
-            Token::CommentToken { .. } => self.handle_in_body(),
-            Token::DocTypeToken { .. } => self.handle_in_body(),
+            Token::TextToken { .. } => {
+                self.handle_in_body();
+            }
+            Token::CommentToken { .. } => {
+                self.handle_in_body();
+            }
+            Token::DocTypeToken { .. } => {
+                self.handle_in_body();
+            }
             Token::StartTagToken { name, .. }
                 if name == "base"
                     || name == "basefont"
@@ -3004,12 +3008,19 @@ impl<'stream> Html5Parser<'stream> {
             {
                 self.handle_in_head();
             }
-            Token::EndTagToken { name, .. } if name == "template" => self.handle_in_head(),
+            Token::EndTagToken { name, .. } if name == "template" => {
+                self.handle_in_head();
+            }
             Token::StartTagToken { name, .. }
-                if ["caption", "colgroup", "tbody", "tfoot", "thead"].contains(&name.as_str()) =>
+                if name == "caption"
+                    || name == "colgroup"
+                    || name == "tbody"
+                    || name == "tfoot"
+                    || name == "thead" =>
             {
                 self.template_insertion_mode.pop();
                 self.template_insertion_mode.push(InsertionMode::InTable);
+
                 self.insertion_mode = InsertionMode::InTable;
                 self.reprocess_token = true;
             }
@@ -3040,15 +3051,17 @@ impl<'stream> Html5Parser<'stream> {
                 self.reprocess_token = true;
             }
             Token::EndTagToken { .. } => {
-                self.parse_error("table end tag not allowed in in template insertion mode");
+                self.parse_error("end tag not allowed in in template insertion mode");
                 // ignore token
+                return;
             }
             Token::EofToken => {
                 if !self.open_elements_has("template") {
                     self.stop_parsing();
                     return;
                 }
-                self.parse_error("eof token not allowed in template insertion mode");
+
+                self.parse_error("eof not allowed in in template insertion mode");
 
                 self.pop_until("template");
                 self.active_formatting_elements_clear_until_marker();
@@ -3180,7 +3193,7 @@ impl<'stream> Html5Parser<'stream> {
                 attributes,
             } if name == "input" => {
                 if !attributes.contains_key("type")
-                    || attributes.get("type").unwrap().to_lowercase() != String::from("hidden")
+                    || attributes.get("type").unwrap().to_lowercase() != *"hidden"
                 {
                     anything_else = true;
                 } else {
@@ -3289,7 +3302,6 @@ impl<'stream> Html5Parser<'stream> {
                 } else {
                     self.parse_error("optgroup end tag not allowed in in select insertion mode");
                     // ignore token
-                    return;
                 }
             }
             Token::EndTagToken { name, .. } if name == "option" => {
@@ -3298,7 +3310,6 @@ impl<'stream> Html5Parser<'stream> {
                 } else {
                     self.parse_error("option end tag not allowed in in select insertion mode");
                     // ignore token
-                    return;
                 }
             }
             Token::EndTagToken { name, .. } if name == "select" => {
@@ -3699,19 +3710,10 @@ impl<'stream> Html5Parser<'stream> {
 
             if let Token::TextToken { value } = token {
                 // check if the token needs splitting
-                let first_non_whitespace_position =
-                    value.chars().position(|c| !c.is_whitespace()).unwrap_or(0);
-
-                if first_non_whitespace_position > 0 {
+                for c in value.chars() {
                     self.token_queue.push(Token::TextToken {
-                        value: value[0..first_non_whitespace_position].to_string(),
+                        value: c.to_string(),
                     });
-
-                    self.token_queue.push(Token::TextToken {
-                        value: value[first_non_whitespace_position..].to_string(),
-                    });
-                } else {
-                    self.token_queue.push(Token::TextToken { value });
                 }
             } else {
                 // Simply return the token
