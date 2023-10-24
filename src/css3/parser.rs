@@ -514,7 +514,6 @@ mod test {
         let mut parser = CSS3Parser::new();
         let style_sheet = parser.parse(
             r#"
-            
                 #header div > p {
                     display: flex;
                     width: 100px;

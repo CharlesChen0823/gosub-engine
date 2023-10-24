@@ -11,7 +11,7 @@ use crate::html5::error_logger::{ErrorLogger, ParseError, ParserError};
 use crate::html5::input_stream::InputStream;
 use crate::html5::node::{Node, NodeData, HTML_NAMESPACE, MATHML_NAMESPACE, SVG_NAMESPACE};
 use crate::html5::parser::attr_replacements::{
-    MATHML_ADJUSTMENTS, SVG_ADJUSTMENTS, XML_ADJUSTMENTS,
+    MATHML_ADJUSTMENTS, SVG_ADJUSTMENTS_ATTRIBUTES, SVG_ADJUSTMENTS_TAG, XML_ADJUSTMENTS,
 };
 use crate::html5::parser::document::{Document, DocumentFragment, DocumentType};
 use crate::html5::parser::quirks::QuirksMode;
@@ -488,7 +488,6 @@ impl<'stream> Html5Parser<'stream> {
                                 "doctype not allowed in 'head no script' insertion mode",
                             );
                             // ignore token
-                            continue;
                         }
                         Token::StartTagToken { name, .. } if name == "html" => {
                             self.handle_in_body();
@@ -524,12 +523,10 @@ impl<'stream> Html5Parser<'stream> {
                                 "head or noscript tag not allowed in after head insertion mode",
                             );
                             // ignore token
-                            continue;
                         }
                         Token::EndTagToken { .. } => {
                             self.parse_error("end tag not allowed in after head insertion mode");
                             // ignore token
-                            continue;
                         }
                         _ => {
                             anything_else = true;
@@ -711,7 +708,6 @@ impl<'stream> Html5Parser<'stream> {
                             if process_as_intable_anything_else {
                                 let tmp = self.current_token.clone();
                                 self.current_token = Token::TextToken { value: tokens };
-
                                 self.foster_parenting = true;
                                 self.handle_in_body();
                                 self.foster_parenting = false;
@@ -819,6 +815,9 @@ impl<'stream> Html5Parser<'stream> {
                         }
                         Token::EndTagToken { name, .. } if name == "template" => {
                             self.handle_in_head();
+                        }
+                        Token::EofToken => {
+                            self.insertion_mode = InsertionMode::InBody;
                         }
                         Token::EndTagToken { name, .. } if name == "colgroup" => {
                             if current_node!(self).name != "colgroup" {
@@ -2110,6 +2109,16 @@ impl<'stream> Html5Parser<'stream> {
                 if !self.template_insertion_mode.is_empty() {
                     self.handle_in_template();
                 } else {
+                    if self.open_elements.iter().any(|id| {
+                        let node = get_node_by_id!(self.document, *id);
+                        ![
+                            "dd", "dt", "li", "optgroup", "option", "p", "rb", "rp", "rt", "rtc",
+                            "tbody", "td", "tfoot", "th", "thead", "tr", "body", "html",
+                        ]
+                        .contains(&node.name.as_str())
+                    }) {
+                        self.parse_error("not allo tag");
+                    }
                     // @TODO: do stuff
                     self.stop_parsing();
                 }
@@ -2121,7 +2130,16 @@ impl<'stream> Html5Parser<'stream> {
                     return;
                 }
 
-                // @TODO: Other stuff
+                if self.open_elements.iter().any(|id| {
+                    let node = get_node_by_id!(self.document, *id);
+                    ![
+                        "dd", "dt", "li", "optgroup", "option", "p", "rb", "rp", "rt", "rtc",
+                        "tbody", "td", "tfoot", "th", "thead", "tr", "body", "html",
+                    ]
+                    .contains(&node.name.as_str())
+                }) {
+                    self.parse_error("not allo tag");
+                }
 
                 self.insertion_mode = InsertionMode::AfterBody;
             }
@@ -2132,7 +2150,16 @@ impl<'stream> Html5Parser<'stream> {
                     return;
                 }
 
-                // @TODO: Other stuff
+                if self.open_elements.iter().any(|id| {
+                    let node = get_node_by_id!(self.document, *id);
+                    ![
+                        "dd", "dt", "li", "optgroup", "option", "p", "rb", "rp", "rt", "rtc",
+                        "tbody", "td", "tfoot", "th", "thead", "tr", "body", "html",
+                    ]
+                    .contains(&node.name.as_str())
+                }) {
+                    self.parse_error("not allo tag");
+                }
 
                 self.insertion_mode = InsertionMode::AfterBody;
                 self.reprocess_token = true;
@@ -2329,6 +2356,13 @@ impl<'stream> Html5Parser<'stream> {
                     || name == "summary"
                     || name == "ul" =>
             {
+                if name == "pre" {
+                    let node_id = self.open_elements.last().unwrap();
+                    let node = get_node_by_id!(self.document, *node_id);
+                    if node.name == "pre" {
+                        // TODO remove \n from previouse tokens
+                    }
+                }
                 if !self.is_in_scope(name, Scope::Regular) {
                     self.parse_error("end tag not in scope");
                     // ignore token
@@ -2716,7 +2750,6 @@ impl<'stream> Html5Parser<'stream> {
                 }
 
                 self.reconstruct_formatting();
-
                 self.insert_html_element(&self.current_token.clone());
             }
             Token::StartTagToken { name, .. } if name == "rb" || name == "rtc" => {
@@ -2805,7 +2838,7 @@ impl<'stream> Html5Parser<'stream> {
                 self.reconstruct_formatting();
                 self.insert_html_element(&self.current_token.clone());
             }
-            _ => any_other_end_tag = true,
+            Token::EndTagToken { .. } => any_other_end_tag = true,
         }
 
         if any_other_end_tag {
@@ -2995,7 +3028,6 @@ impl<'stream> Html5Parser<'stream> {
                 self.template_insertion_mode.pop();
                 self.template_insertion_mode
                     .push(InsertionMode::InColumnGroup);
-
                 self.insertion_mode = InsertionMode::InColumnGroup;
                 self.reprocess_token = true;
             }
@@ -3003,21 +3035,18 @@ impl<'stream> Html5Parser<'stream> {
                 self.template_insertion_mode.pop();
                 self.template_insertion_mode
                     .push(InsertionMode::InTableBody);
-
                 self.insertion_mode = InsertionMode::InTableBody;
                 self.reprocess_token = true;
             }
             Token::StartTagToken { name, .. } if name == "td" || name == "th" => {
                 self.template_insertion_mode.pop();
                 self.template_insertion_mode.push(InsertionMode::InRow);
-
                 self.insertion_mode = InsertionMode::InRow;
                 self.reprocess_token = true;
             }
             Token::StartTagToken { .. } => {
                 self.template_insertion_mode.pop();
                 self.template_insertion_mode.push(InsertionMode::InBody);
-
                 self.insertion_mode = InsertionMode::InBody;
                 self.reprocess_token = true;
             }
@@ -3519,8 +3548,10 @@ impl<'stream> Html5Parser<'stream> {
         if let Token::StartTagToken { attributes, .. } = token {
             let mut new_attributes = HashMap::new();
             for (name, value) in attributes.iter() {
-                if SVG_ADJUSTMENTS.contains_key(name) {
-                    let new_name = SVG_ADJUSTMENTS.get(name).expect("svg adjustments");
+                if SVG_ADJUSTMENTS_ATTRIBUTES.contains_key(name) {
+                    let new_name = SVG_ADJUSTMENTS_ATTRIBUTES
+                        .get(name)
+                        .expect("svg adjustments");
                     new_attributes.insert(new_name.to_string(), value.clone());
                 } else {
                     new_attributes.insert(name.clone(), value.clone());
@@ -3530,13 +3561,23 @@ impl<'stream> Html5Parser<'stream> {
         }
     }
 
+    /// adjusts tag name in the given token for svg
+    fn adjust_svg_tag_name(&self, token: &mut Token) {
+        if let Token::StartTagToken { name, .. } = token {
+            if SVG_ADJUSTMENTS_TAG.contains_key(name) {
+                let new_name = SVG_ADJUSTMENTS_TAG.get(name).expect("svg adjust tag name");
+                *name = new_name.to_string()
+            }
+        }
+    }
+
     // Adjust attribute names in the given token for MathML
     fn adjust_mathml_attributes(&self, token: &mut Token) {
         if let Token::StartTagToken { attributes, .. } = token {
             let mut new_attributes = HashMap::new();
             for (name, value) in attributes.iter() {
                 if MATHML_ADJUSTMENTS.contains_key(name) {
-                    let new_name = SVG_ADJUSTMENTS.get(name).expect("svg adjustments");
+                    let new_name = MATHML_ADJUSTMENTS.get(name).unwrap();
                     new_attributes.insert(new_name.to_string(), value.clone());
                 } else {
                     new_attributes.insert(name.clone(), value.clone());
