@@ -27,7 +27,7 @@ const DISABLED_CASES: &[&str] = &[
     "<!DOCTYPE html><textarea>foo</textarea>",
     "<p><table></table>",
     // tests6.dat
-    "<body><div>",
+    "<body>\n<div>",
     "<frameset></frameset><noframes>",
     "</caption><div>",
     "</table><div>",
