@@ -371,7 +371,7 @@ impl<'stream> Html5Parser<'stream> {
                     }
 
                     if anything_else {
-                        if self.parser_cannot_change_mode {
+                        if !self.parser_cannot_change_mode {
                             self.document.get_mut().quirks_mode = QuirksMode::Quirks;
                         }
 

@@ -6,12 +6,7 @@ use test_case::test_case;
 const DISABLED_CASES: &[&str] = &[
     // tests2.dat
     "<!DOCTYPE html><table><tr>TEST",
-    r#"<!DOCTYPE html><body><title>X</title><meta name=z><link rel=foo><style>x { content:"</style" } </style>"#,
-    "<!DOCTYPE html><html><body><html id=x>",
-    r#"<!DOCTYPE html>X</body><html id="x">"#,
     "<!DOCTYPE html>X<p/x/y/z>",
-    // tests3.dat
-    "<p><table></table>",
     // tests6.dat
     "<body>\n<div>",
     "<frameset></frameset><noframes>",
