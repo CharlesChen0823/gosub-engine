@@ -31,7 +31,7 @@ fn main() -> Result<()> {
         tests_failed: Vec::new(),
     };
 
-    let filenames = Some(&["tests8.dat"][..]);
+    let filenames = Some(&["tests26.dat"][..]);
     let fixtures = testing::tree_construction::fixtures(filenames).expect("fixtures");
 
     for fixture_file in fixtures {

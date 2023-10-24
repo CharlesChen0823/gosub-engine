@@ -525,7 +525,7 @@ impl<'stream> Html5Parser<'stream> {
                     if anything_else {
                         self.parse_error("anything else not allowed in after head insertion mode");
 
-                        self.pop_check("no_script");
+                        self.pop_check("noscript");
                         self.check_last_element("head");
 
                         self.insertion_mode = InsertionMode::InHead;
@@ -683,10 +683,11 @@ impl<'stream> Html5Parser<'stream> {
                         }
                         _ => {
                             let tokens = self.pending_table_character_tokens.clone();
+                            self.pending_table_character_tokens.clear();
 
                             let mut process_as_intable_anything_else = false;
 
-                            for c in self.pending_table_character_tokens.chars() {
+                            for c in tokens.chars() {
                                 if !c.is_ascii_whitespace() {
                                     self.parse_error("non whitespace character in pending table character tokens");
                                     process_as_intable_anything_else = true;
@@ -707,7 +708,7 @@ impl<'stream> Html5Parser<'stream> {
                                 self.insert_text_element(&Token::TextToken { value: tokens });
                             }
 
-                            self.pending_table_character_tokens.clear();
+                            // self.pending_table_character_tokens.clear();
 
                             self.insertion_mode = self.original_insertion_mode;
                             self.reprocess_token = true;
