@@ -919,7 +919,7 @@ impl<'stream> Html5Parser<'stream> {
                             self.insertion_mode = InsertionMode::InRow;
                             self.reprocess_token = true;
                         }
-                        Token::StartTagToken { name, .. }
+                        Token::EndTagToken { name, .. }
                             if name == "tbody" || name == "tfoot" || name == "thead" =>
                         {
                             if !self.is_in_scope(name, Scope::Table) {
