@@ -2936,7 +2936,96 @@ impl<'stream> Html5Parser<'stream> {
 
     /// Handle insertion mode "in_template"
     fn handle_in_template(&mut self) {
-        todo!()
+        match &self.current_token {
+            Token::TextToken { .. } => {
+                self.handle_in_body();
+            }
+            Token::CommentToken { .. } => {
+                self.handle_in_body();
+            }
+            Token::DocTypeToken { .. } => {
+                self.handle_in_body();
+            }
+            Token::StartTagToken { name, .. }
+                if name == "base"
+                    || name == "basefont"
+                    || name == "bgsound"
+                    || name == "link"
+                    || name == "meta"
+                    || name == "noframes"
+                    || name == "script"
+                    || name == "style"
+                    || name == "template"
+                    || name == "title" =>
+            {
+                self.handle_in_head();
+            }
+            Token::EndTagToken { name, .. } if name == "template" => {
+                self.handle_in_head();
+            }
+            Token::StartTagToken { name, .. }
+                if name == "caption"
+                    || name == "colgroup"
+                    || name == "tbody"
+                    || name == "tfoot"
+                    || name == "thead" =>
+            {
+                self.template_insertion_mode.pop();
+                self.template_insertion_mode.push(InsertionMode::InTable);
+
+                self.insertion_mode = InsertionMode::InTable;
+                self.reprocess_token = true;
+            }
+            Token::StartTagToken { name, .. } if name == "col" => {
+                self.template_insertion_mode.pop();
+                self.template_insertion_mode
+                    .push(InsertionMode::InColumnGroup);
+
+                self.insertion_mode = InsertionMode::InColumnGroup;
+                self.reprocess_token = true;
+            }
+            Token::StartTagToken { name, .. } if name == "tr" => {
+                self.template_insertion_mode.pop();
+                self.template_insertion_mode
+                    .push(InsertionMode::InTableBody);
+
+                self.insertion_mode = InsertionMode::InTableBody;
+                self.reprocess_token = true;
+            }
+            Token::StartTagToken { name, .. } if name == "td" || name == "th" => {
+                self.template_insertion_mode.pop();
+                self.template_insertion_mode.push(InsertionMode::InRow);
+
+                self.insertion_mode = InsertionMode::InRow;
+                self.reprocess_token = true;
+            }
+            Token::StartTagToken { .. } => {
+                self.template_insertion_mode.pop();
+                self.template_insertion_mode.push(InsertionMode::InBody);
+
+                self.insertion_mode = InsertionMode::InBody;
+                self.reprocess_token = true;
+            }
+            Token::EndTagToken { .. } => {
+                self.parse_error("end tag not allowed in in template insertion mode");
+                // ignore token
+                return;
+            }
+            Token::EofToken => {
+                if !self.open_elements_has("template") {
+                    self.stop_parsing();
+                    return;
+                }
+
+                self.parse_error("eof not allowed in in template insertion mode");
+
+                self.pop_until("template");
+                self.active_formatting_elements_clear_until_marker();
+                self.template_insertion_mode.pop();
+                self.reset_insertion_mode();
+                self.reprocess_token = true;
+            }
+        }
     }
 
     /// Handle insertion mode "in_table"
