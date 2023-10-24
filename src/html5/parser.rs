@@ -816,9 +816,6 @@ impl<'stream> Html5Parser<'stream> {
                         Token::EndTagToken { name, .. } if name == "template" => {
                             self.handle_in_head();
                         }
-                        Token::EofToken => {
-                            self.insertion_mode = InsertionMode::InBody;
-                        }
                         Token::EndTagToken { name, .. } if name == "colgroup" => {
                             if current_node!(self).name != "colgroup" {
                                 self.parse_error("colgroup end tag not at top of stack");

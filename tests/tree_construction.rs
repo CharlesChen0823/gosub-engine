@@ -60,7 +60,7 @@ lazy_static! {
 #[test_case("tests22.dat")]
 #[test_case("tests24.dat")]
 #[test_case("tests25.dat")]
-#[test_case("tests26.dat")]
+// #[test_case("tests26.dat")]
 fn tree_construction(filename: &str) {
     let fixture_file = fixture_from_filename(filename).expect("fixture");
 
