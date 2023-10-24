@@ -1858,7 +1858,15 @@ impl<'stream> Html5Parser<'stream> {
                     return;
                 }
 
-                self.open_elements.remove(1);
+                if self.open_elements.len() > 1 {
+                    let second_node_id = self.open_elements[1];
+                    let second_node = get_node_by_id!(self.document, second_node_id);
+                    if second_node.parent.is_some() {
+                        self.document
+                            .get_mut()
+                            .detach_node_from_parent(second_node_id);
+                    }
+                }
 
                 while current_node!(self).name != "html" {
                     self.open_elements.pop();

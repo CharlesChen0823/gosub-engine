@@ -32,8 +32,6 @@ const DISABLED_CASES: &[&str] = &[
     // tests8.dat
     "x<table>x",
     "x<table><table>x",
-    // tests15.dat
-    "<frame></frame></frame><frameset><frame><frameset><frame></frameset><noframes></frameset><noframes>",
     // tests24.dat
     "<!DOCTYPE html>&ThickSpace;A",
 ];
