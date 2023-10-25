@@ -155,6 +155,26 @@ impl Node {
     pub fn matches_tag_and_attrs(&self, other: &Self) -> bool {
         self.name == other.name && self.namespace == other.namespace && self.data == other.data
     }
+
+    pub fn matches_tag_and_attrs_without_order(&self, other: &Self) -> bool {
+        if self.name != other.name || self.namespace != other.namespace {
+            return false
+        }
+
+        match &self.data {
+            NodeData::Element(element) => {
+                let current_attribute = &element.attributes.clone();
+                if let NodeData::Element(other_element) = &other.data {
+                    let other_element = &other_element.attributes.clone();
+                    return current_attribute.eq(other_element)
+                }
+                return false
+            }
+            _ => {
+                return self.data == other.data
+            }
+        }
+    }
 }
 
 impl Clone for Node {

@@ -147,7 +147,7 @@ impl NodeInsertLocation {
 }
 
 /// Active formatting elements, which could be a regular node(id), or a marker
-#[derive(PartialEq, Clone, Copy)]
+#[derive(PartialEq, Clone, Copy, Debug)]
 enum ActiveElement {
     Node(NodeId),
     Marker,
@@ -3216,6 +3216,7 @@ impl<'stream> Html5Parser<'stream> {
                 ActiveElement::Marker => unreachable!(),
             };
             if match_node.matches_tag_and_attrs(&element_node) {
+            // if match_node.matches_tag_and_attrs_without_order(&element_node) {
                 // Noah's Ark clause: we only allow 3 (instead of 2) of each tag (between markers)
                 found += 1;
                 if found == 3 {
@@ -3235,7 +3236,57 @@ impl<'stream> Html5Parser<'stream> {
             .push(ActiveElement::Node(node_id));
     }
 
+    fn is_mark_or_open(&self, entry: ActiveElement) -> bool {
+        match entry {
+            ActiveElement::Marker => true,
+            ActiveElement::Node(node_id) => {
+                self.open_elements.iter().rev().any(|n| n == &node_id)
+            }
+        }
+    }
+
     fn reconstruct_formatting(&mut self) {
+        let last = match self.active_formatting_elements.last() {
+            None => return,
+            Some(entry) => {
+                if self.is_mark_or_open(*entry) {
+                    return;
+                }
+                match entry {
+                    ActiveElement::Marker => unreachable!(),
+                    ActiveElement::Node(node_id) => node_id,
+                }
+            }
+        };
+        let mut index = self.active_formatting_elements.len() - 1;
+        loop {
+            if index == 0 {
+                break;
+            }
+            index -= 1;
+            if self.is_mark_or_open(self.active_formatting_elements[index]) {
+                index += 1;
+                break;
+            }
+        }
+        loop {
+            let entry = self.active_formatting_elements[index];
+            if let ActiveElement::Marker = entry {
+                break;
+            }
+            let node_id = entry.node_id().expect("node id not found");
+            let entry_node = get_node_by_id!(self.document, node_id).clone();
+            let new_node_id = self.insert_element_from_node(entry_node, None);
+            self.active_formatting_elements[index] = ActiveElement::Node(new_node_id);
+            if index == self.active_formatting_elements.len() - 1 {
+                break;
+            }
+            index += 1;
+        }
+
+    }
+
+    fn reconstruct_formatting_bk(&mut self) {
         if self.active_formatting_elements.is_empty() {
             return; // Nothing to reconstruct.
         }
