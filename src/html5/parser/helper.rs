@@ -102,7 +102,7 @@ impl<'stream> Html5Parser<'stream> {
                             return;
                         };
                         self.document
-                            .attach_node_to_parent(node, parent, Some(index - 1));
+                            .attach_node_to_parent(node, parent, Some(index));
                     }
                 }
             }

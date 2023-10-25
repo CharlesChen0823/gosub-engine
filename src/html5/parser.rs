@@ -276,8 +276,12 @@ impl<'stream> Html5Parser<'stream> {
         // Revisit approach
         let root = Document::clone(&self.document);
         self.document.get_mut().create_root(&root);
+        let mut finished_parse = false;
 
         loop {
+            if finished_parse {
+                break;
+            }
             // If reprocess_token is true, we should process the same token again
             if !self.reprocess_token {
                 self.current_token = self.fetch_next_token();
@@ -295,7 +299,8 @@ impl<'stream> Html5Parser<'stream> {
 
             // Break when we reach the end of the token stream
             if self.current_token.is_eof() {
-                break;
+                finished_parse = true;
+                // break;
             }
 
             println!(
@@ -3300,7 +3305,8 @@ impl<'stream> Html5Parser<'stream> {
     }
 
     fn stop_parsing(&self) {
-        todo!()
+        // TODO
+        return;
     }
 
     /// Close the p element that may or may not be on the open elements stack

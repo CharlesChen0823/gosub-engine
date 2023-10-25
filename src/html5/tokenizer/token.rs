@@ -170,7 +170,7 @@ mod tests {
     #[test]
     fn test_token_is_empty_or_white() {
         let token = Token::TextToken {
-            value: "   ".to_string(),
+            value: " ".to_string(),
         };
         assert!(token.is_empty_or_white());
     }

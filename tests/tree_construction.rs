@@ -5,7 +5,6 @@ use test_case::test_case;
 
 const DISABLED_CASES: &[&str] = &[
     // tests2.dat
-    "<!DOCTYPE html><table><tr>TEST",
     "<!DOCTYPE html>X<p/x/y/z>",
     // tests6.dat
     "<body>\n<div>",
@@ -29,9 +28,6 @@ const DISABLED_CASES: &[&str] = &[
     "</body><frameset></frameset>",
     // tests7.dat
     "<body>X</body></body>",
-    // tests8.dat
-    "x<table>x",
-    "x<table><table>x",
 ];
 
 lazy_static! {
