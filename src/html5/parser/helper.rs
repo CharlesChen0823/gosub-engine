@@ -1,6 +1,6 @@
 use crate::html5::element_class::ElementClass;
 use crate::html5::node::data::text::TextData;
-use crate::html5::node::{Node, NodeData, NodeId, HTML_NAMESPACE};
+use crate::html5::node::{Node, NodeData, NodeId, HTML_NAMESPACE, MATHML_NAMESPACE, SVG_NAMESPACE};
 use crate::html5::parser::{ActiveElement, Html5Parser, Scope};
 use crate::html5::tokenizer::token::Token;
 use std::collections::HashMap;
@@ -20,6 +20,28 @@ pub enum BookMark<NodeId> {
 }
 
 impl<'stream> Html5Parser<'stream> {
+    pub fn mathml_text_integration_point(&self, node: Node) -> bool {
+        let namespace = node.namespace.unwrap_or("".to_string());
+        let (name, namespace) = (node.name.as_str(), namespace.as_str());
+        matches!(
+            (name, namespace),
+            ("mi", MATHML_NAMESPACE)
+                | ("mo", MATHML_NAMESPACE)
+                | ("mn", MATHML_NAMESPACE)
+                | ("ms", MATHML_NAMESPACE)
+                | ("mtext", MATHML_NAMESPACE)
+        )
+    }
+
+    pub fn svg_html_integration_point(&self, node: Node) -> bool {
+        let namespace = node.namespace.unwrap_or("".to_string());
+        let (name, namespace) = (node.name.as_str(), namespace.as_str());
+        matches!(
+            (name, namespace),
+            ("foreignObject", SVG_NAMESPACE) | ("desc", SVG_NAMESPACE) | ("title", SVG_NAMESPACE)
+        )
+    }
+
     fn find_position_in_active_format(&self, node_id: &NodeId) -> Option<usize> {
         self.active_formatting_elements
             .iter()
@@ -182,6 +204,7 @@ impl<'stream> Html5Parser<'stream> {
     pub fn insert_element(&mut self, node: Node, override_node: Option<NodeId>) -> NodeId {
         let node_id = self.document.get_mut().add_new_node(node);
         let insert_position = self.appropriate_place_insert(override_node);
+        // println!("------node_id{:?}-------insert_position{:?}----open_elements{:?}", node_id, insert_position, self.open_elements);
         self.insert_element_helper(node_id, insert_position);
 
         //     if parser not created as part of html fragment parsing algorithm

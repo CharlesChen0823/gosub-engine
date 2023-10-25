@@ -2132,13 +2132,6 @@ impl<'stream> Html5Parser<'stream> {
                     || name == "summary"
                     || name == "ul" =>
             {
-                if name == "pre" {
-                    let node_id = self.open_elements.last().unwrap();
-                    let node = get_node_by_id!(self.document, *node_id);
-                    if node.name == "pre" {
-                        // TODO remove \n from previouse tokens
-                    }
-                }
                 if !self.is_in_scope(name, Scope::Regular) {
                     self.parse_error("end tag not in scope");
                     // ignore token
@@ -2246,25 +2239,23 @@ impl<'stream> Html5Parser<'stream> {
                     || name == "h5"
                     || name == "h6" =>
             {
-                if !self.is_in_scope("h1", Scope::Regular)
-                    || !self.is_in_scope("h2", Scope::Regular)
-                    || !self.is_in_scope("h3", Scope::Regular)
-                    || !self.is_in_scope("h4", Scope::Regular)
-                    || !self.is_in_scope("h5", Scope::Regular)
-                    || !self.is_in_scope("h6", Scope::Regular)
+                if ["h1", "h2", "h3", "h4", "h5", "h6"]
+                    .iter()
+                    .map(|x| self.is_in_scope(x, Scope::Regular))
+                    .any(|x| x == true)
                 {
+                    self.generate_implied_end_tags(Some(name), false);
+
+                    if current_node!(self).name != *name {
+                        self.parse_error("end tag not at top of stack");
+                    }
+
+                    self.pop_until_any(&["h1", "h2", "h3", "h4", "h5", "h6"]);
+                } else {
                     self.parse_error("end tag not in scope");
                     // ignore token
                     return;
                 }
-
-                self.generate_implied_end_tags(Some(name), false);
-
-                if current_node!(self).name != *name {
-                    self.parse_error("end tag not at top of stack");
-                }
-
-                self.pop_until_any(&["h1", "h2", "h3", "h4", "h5", "h6"]);
             }
             Token::EndTagToken { name, .. } if name == "sarcasm" => {
                 // Take a deep breath
@@ -2611,6 +2602,10 @@ impl<'stream> Html5Parser<'stream> {
                 // ignore token
             }
             Token::StartTagToken { .. } => {
+                println!(
+                    "-----{}----a-------a----{:?}",
+                    self.current_token, self.open_elements
+                );
                 self.reconstruct_formatting();
                 self.insert_html_element(&self.current_token.clone());
             }
@@ -3436,6 +3431,38 @@ impl<'stream> Html5Parser<'stream> {
     /// Handles and other end tag as found during the in-body insertion mode. This needs to be a
     /// separate function as this is also called during the adoption agency algorithm
     fn handle_in_body_any_other_end_tag(&mut self) {
+        let token_name = match self.current_token {
+            Token::EndTagToken { ref name, .. } => name.clone(),
+            _ => unreachable!(),
+        };
+        let mut match_idx = None;
+        for (idx, node_id) in self.open_elements.iter().enumerate().rev() {
+            let node = get_node_by_id!(self.document, *node_id).clone();
+            if node.name == token_name {
+                match_idx = Some(idx);
+                break;
+            }
+
+            if node.is_special() {
+                self.parse_error("error");
+                return;
+            }
+        }
+
+        let match_idx = match match_idx {
+            None => {
+                return;
+            }
+            Some(idx) => idx,
+        };
+
+        self.generate_implied_end_tags(Some(token_name.as_str()), false);
+        if match_idx != self.open_elements.len() - 1 {
+            self.parse_error("error");
+        }
+        self.open_elements.truncate(match_idx);
+    }
+    fn handle_in_body_any_other_end_tag_bk(&mut self) {
         if self.open_elements.is_empty() {
             self.parse_error("no open elements");
             // ignore token
