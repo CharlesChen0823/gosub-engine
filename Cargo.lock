@@ -305,6 +305,7 @@ dependencies = [
  "typed-arena",
  "ureq",
  "uuid",
+ "walkdir",
 ]
 
 [[package]]

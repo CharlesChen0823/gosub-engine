@@ -1,9 +1,10 @@
 use super::FIXTURE_ROOT;
+use crate::html5::node::{HTML_NAMESPACE, MATHML_NAMESPACE, SVG_NAMESPACE};
 use crate::{
     html5::{
         error_logger::ParseError,
         input_stream::InputStream,
-        node::{NodeData, NodeId, MATHML_NAMESPACE, SVG_NAMESPACE},
+        node::{NodeData, NodeId},
         parser::{
             document::{Document, DocumentHandle},
             Html5Parser,
@@ -18,69 +19,78 @@ use std::{
     path::{Path, PathBuf},
 };
 
+/// Holds all tests as found in the given fixture file
 #[derive(Debug, PartialEq)]
 pub struct FixtureFile {
     pub tests: Vec<Test>,
     pub path: PathBuf,
 }
 
+/// Holds information about an error
 #[derive(Clone, Debug, PartialEq)]
 pub struct Error {
+    /// The code or message of the error
     pub code: String,
+    /// The line number (1-based) where the error occurred
     pub line: i64,
+    /// The column number (1-based) where the error occurred
     pub col: i64,
 }
 
+/// Holds a single parser test
 #[derive(Debug, PartialEq)]
 pub struct Test {
     /// Filename of the test
     pub file_path: String,
     /// Line number of the test
     pub line: usize,
-    /// input stream
+    /// Actual input stream data
     pub data: String,
-    /// errors
+    /// Any errors that are expected to be found
     pub errors: Vec<Error>,
-    /// document tree
+    /// The document tree that is expected to be parsed
     pub document: Vec<String>,
-    /// fragment
+    /// The fragment that is expected to be parsed
     document_fragment: Vec<String>,
-    /// Scripting should be enabled
+    /// True when scripting in the parser should be enabled during test
     scripting_enabled: bool,
 }
 
+/// Holds the result of a single "node" (which is either an element, text or comment)
 pub enum NodeResult {
+    /// An attribute of an element node did not match
     AttributeMatchFailure {
         name: String,
         actual: String,
         expected: String,
     },
 
+    /// The actual element does not match the expected element
     ElementMatchFailure {
         name: String,
         actual: String,
         expected: String,
     },
 
-    ElementMatchSuccess {
-        actual: String,
-    },
+    /// The element matches the expected element
+    ElementMatchSuccess { actual: String },
 
+    /// A text node did not match
     TextMatchFailure {
         actual: String,
         expected: String,
         text: String,
     },
 
+    /// A comment node did not match
     CommentMatchFailure {
         actual: String,
         expected: String,
         comment: String,
     },
 
-    TextMatchSuccess {
-        expected: String,
-    },
+    /// A text node matches
+    TextMatchSuccess { expected: String },
 }
 
 pub struct SubtreeResult {
@@ -118,7 +128,7 @@ impl TestResult {
 }
 
 impl Test {
-    // Check that the tree construction code doesn't panic
+    /// Runs the test and returns the result
     pub fn run(&self) -> Result<TestResult> {
         let (actual_document, actual_errors) = self.parse()?;
         let root = self.match_document_tree(&actual_document.get());
@@ -130,7 +140,7 @@ impl Test {
         })
     }
 
-    // Verify that the tree construction code obtains the right result
+    /// Verifies that the tree construction code obtains the right result
     pub fn assert_valid(&self) {
         let result = self.run().expect("failed to parse");
 
@@ -178,6 +188,7 @@ impl Test {
         assert!(result.success(), "invalid tree-construction result");
     }
 
+    /// Run the parser and return the document and errors
     pub fn parse(&self) -> Result<(DocumentHandle, Vec<ParseError>)> {
         // Do the actual parsing
         let mut is = InputStream::new();
@@ -192,10 +203,12 @@ impl Test {
         Ok((document, parse_errors))
     }
 
-    fn match_document_tree(&self, document: &Document) -> SubtreeResult {
+    /// Returns true if the whole document tree matches the expected result
+    pub fn match_document_tree(&self, document: &Document) -> SubtreeResult {
         self.match_node(NodeId::root(), 0, -1, document)
     }
 
+    /// Match a single node and its children
     fn match_node(
         &self,
         node_idx: NodeId,
@@ -206,31 +219,28 @@ impl Test {
         let mut next_expected_idx = document_offset_id;
 
         let node = document.get_node_by_id(node_idx).unwrap();
-        let namespace = node.namespace.clone().unwrap_or("".to_string());
 
         let node_result = match &node.data {
             NodeData::Element(element) => {
-                let actual = if [SVG_NAMESPACE, MATHML_NAMESPACE].contains(&namespace.as_str()) {
-                    if namespace == SVG_NAMESPACE {
-                        format!(
-                            "|{}<svg {}>",
-                            " ".repeat((indent as usize * 2) + 1),
-                            element.name()
-                        )
-                    } else {
-                        format!(
-                            "|{}<math {}>",
-                            " ".repeat((indent as usize * 2) + 1),
-                            element.name()
-                        )
-                    }
-                } else {
-                    format!(
-                        "|{}<{}>",
-                        " ".repeat((indent as usize * 2) + 1),
-                        element.name()
-                    )
+                let prefix: String = match &node.namespace {
+                    Some(namespace) => match namespace.as_str() {
+                        HTML_NAMESPACE => "".into(), // HTML elements don't have a prefix
+                        SVG_NAMESPACE => "svg ".into(),
+                        MATHML_NAMESPACE => "math ".into(),
+                        _ => {
+                            panic!("unknown namespace: {}", namespace);
+                        }
+                    },
+                    None => "".into(),
                 };
+
+                let actual = format!(
+                    "|{}<{}{}>",
+                    " ".repeat((indent as usize * 2) + 1),
+                    prefix,
+                    element.name()
+                );
+
                 let expected = self.document[next_expected_idx as usize].to_owned();
                 next_expected_idx += 1;
 
@@ -249,7 +259,15 @@ impl Test {
                 }
 
                 // Check attributes if any
+
+                // Make sure the attributes are sorted
+                let mut sorted_attrs = vec![];
                 for attr in element.attributes.iter() {
+                    sorted_attrs.push(attr);
+                }
+                sorted_attrs.sort_by(|a, b| a.0.cmp(b.0));
+
+                for attr in sorted_attrs {
                     let expected = self.document[next_expected_idx as usize].to_owned();
                     next_expected_idx += 1;
 
@@ -284,8 +302,23 @@ impl Test {
                     " ".repeat(indent as usize * 2 + 1),
                     text.value()
                 );
-                let expected = self.document[next_expected_idx as usize].to_owned();
-                next_expected_idx += 1;
+
+                // Text might be split over multiple lines, read all lines until we find the closing
+                // quote.
+                let mut expected = String::new();
+                loop {
+                    let tmp = self.document[next_expected_idx as usize].to_owned();
+                    next_expected_idx += 1;
+
+                    expected.push_str(&tmp);
+
+                    if tmp.ends_with('\"') {
+                        break;
+                    } else {
+                        // each line is terminated with a newline
+                        expected.push('\n');
+                    }
+                }
 
                 if actual != expected {
                     let node = Some(NodeResult::TextMatchFailure {
@@ -388,7 +421,7 @@ pub fn fixture_from_filename(filename: &str) -> Result<FixtureFile> {
     fixture_from_path(&path)
 }
 
-/// Read given tests file and extract all test data
+/// Reads a given test file and extract all test data
 pub fn fixture_from_path(path: &PathBuf) -> Result<FixtureFile> {
     let file = File::open(path)?;
     // TODO: use thiserror to translate library errors
@@ -476,7 +509,11 @@ pub fn fixture_from_path(path: &PathBuf) -> Result<FixtureFile> {
         || !current_test.errors.is_empty()
         || !current_test.document.is_empty()
     {
-        current_test.data = current_test.data.strip_suffix('\n').unwrap().to_string();
+        current_test.data = current_test
+            .data
+            .strip_suffix('\n')
+            .unwrap_or("")
+            .to_string();
         tests.push(current_test);
     }
 
