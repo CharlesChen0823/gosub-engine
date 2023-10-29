@@ -13,22 +13,24 @@ fn main() -> Result<()> {
     let mut failed = 0;
 
     for file in files.iter() {
-        let fixture = fixture_from_filename(file.as_str())?;
+        let fixture = fixture_from_filename(file)?;
         print!("Test: ({:3}) {} [", fixture.tests.len(), file);
         let _ = std::io::stdout().flush();
 
         // Run tests
         for test in fixture.tests {
-            let result = test.run().expect("problem running tree construction test");
+            let results = test.run().expect("problem running tree construction test");
 
-            total += 1;
-            if result.success() {
-                print!(".");
-            } else {
-                print!("X");
-                failed += 1;
+            for result in results {
+                total += 1;
+                if result.success() {
+                    print!(".");
+                } else {
+                    print!("X");
+                    failed += 1;
+                }
+                let _ = std::io::stdout().flush();
             }
-            let _ = std::io::stdout().flush();
         }
 
         println!("]");
