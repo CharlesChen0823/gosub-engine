@@ -2,13 +2,14 @@ mod parser;
 
 use self::parser::{ErrorSpec, ScriptMode, TestSpec, QUOTED_DOUBLE_NEWLINE};
 use super::FIXTURE_ROOT;
+use crate::html5::node::data::doctype::DocTypeData;
 use crate::html5::node::{HTML_NAMESPACE, MATHML_NAMESPACE, SVG_NAMESPACE};
 use crate::html5::parser::document::DocumentBuilder;
 use crate::html5::parser::tree_builder::TreeBuilder;
 use crate::html5::parser::Html5ParserOptions;
 use crate::{
+    bytes::CharIterator,
     html5::{
-        input_stream::InputStream,
         node::{NodeData, NodeId},
         parser::{
             document::{Document, DocumentHandle},
@@ -70,13 +71,21 @@ pub enum NodeResult {
     },
 
     /// The element matches the expected element
-    ElementMatchSuccess { actual: String },
+    ElementMatchSuccess {
+        actual: String,
+    },
 
     /// A text node did not match
     TextMatchFailure {
         actual: String,
         expected: String,
         text: String,
+    },
+
+    // A doctype node did not match
+    DocTypeMatchFailure {
+        actual: String,
+        expected: String,
     },
 
     /// A comment node did not match
@@ -87,7 +96,9 @@ pub enum NodeResult {
     },
 
     /// A text node matches
-    TextMatchSuccess { expected: String },
+    TextMatchSuccess {
+        expected: String,
+    },
 }
 
 pub struct SubtreeResult {
@@ -172,6 +183,12 @@ impl Test {
                     panic!("text match failed, wanted: [{expected}], got: [{actual}]");
                 }
 
+                Some(NodeResult::DocTypeMatchFailure {
+                    actual, expected, ..
+                }) => {
+                    panic!("doctype match failed, wanted: [{expected}], got: [{actual}]");
+                }
+
                 Some(NodeResult::ElementMatchFailure {
                     actual,
                     expected,
@@ -244,18 +261,18 @@ impl Test {
         // Create a new parser
         let options = Html5ParserOptions { scripting_enabled };
 
-        let mut is = InputStream::new();
-        is.read_from_str(self.data(), None);
+        let mut chars = CharIterator::new();
+        chars.read_from_str(self.data(), None);
 
         let parse_errors = if is_fragment {
             Html5Parser::parse_fragment(
-                &mut is,
+                &mut chars,
                 Document::clone(&document),
                 &context_node.expect(""),
                 Some(options),
             )?
         } else {
-            Html5Parser::parse_document(&mut is, Document::clone(&document), Some(options))?
+            Html5Parser::parse_document(&mut chars, Document::clone(&document), Some(options))?
         };
 
         Ok((document, parse_errors))
@@ -283,6 +300,43 @@ impl Test {
         let node = document.get_node_by_id(node_idx).unwrap();
 
         let node_result = match &node.data {
+            NodeData::DocType(DocTypeData {
+                name,
+                pub_identifier,
+                sys_identifier,
+            }) => {
+                let doctype_text = if pub_identifier.is_empty() && sys_identifier.is_empty() {
+                    // <!DOCTYPE html>
+                    name.to_string()
+                } else {
+                    // <!DOCTYPE html "pubid" "sysid">
+                    format!(r#"{name} "{pub_identifier}" "{sys_identifier}""#,)
+                };
+
+                let actual = format!(
+                    "|{}<!DOCTYPE {}>",
+                    " ".repeat(indent as usize * 2 + 1),
+                    doctype_text.trim(),
+                );
+
+                let expected = self.document[next_expected_idx as usize].to_owned();
+                next_expected_idx += 1;
+
+                if actual != expected {
+                    let node = Some(NodeResult::DocTypeMatchFailure {
+                        actual,
+                        expected: "".to_string(),
+                    });
+
+                    return SubtreeResult {
+                        node,
+                        children: vec![],
+                        next_expected_idx: None,
+                    };
+                }
+
+                Some(NodeResult::TextMatchSuccess { expected })
+            }
             NodeData::Element(element) => {
                 let prefix: String = match &node.namespace {
                     Some(namespace) => match namespace.as_str() {
@@ -357,7 +411,6 @@ impl Test {
 
                 Some(NodeResult::ElementMatchSuccess { actual })
             }
-
             NodeData::Text(text) => {
                 let actual = format!(
                     "|{}\"{}\"",
@@ -398,7 +451,6 @@ impl Test {
 
                 Some(NodeResult::TextMatchSuccess { expected })
             }
-
             NodeData::Comment(comment) => {
                 let actual = format!(
                     "|{}<!-- {} -->",
