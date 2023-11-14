@@ -104,7 +104,7 @@ pub struct RequestBody {}
 pub struct Window {}
 
 /// https://fetch.spec.whatwg.org/#concept-request
-struct Request {
+pub struct Request {
     /// This can be updated during redirects to `GET` as described in HTTP fetch.
     pub method: Method,
     /// A request has an associated local-URLs-only flag. Unless stated otherwise it is unset.

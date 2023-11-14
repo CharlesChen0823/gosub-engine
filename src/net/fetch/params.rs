@@ -1,12 +1,14 @@
-struct Request {}
-
-struct Response {}
+use crate::bytes::Bytes;
+use crate::net::request::Request;
+use crate::net::response::Response;
 
 enum State {
     Ongoing,
     Terminated,
     Aborted,
 }
+
+struct ConnectionTimingInfo {}
 
 pub trait FetchTarget {
     // add code here
@@ -24,11 +26,11 @@ struct FetchController {
     state: State,
     full_timing_info: Option<FetchTimeInfo>,
     /// Null or an algorithm accepting a global object.
-    report_timing_steps: Option,
+    report_timing_steps: Option<usize>,
     /// Null or a Record (result of StructuredSerialize).
     serialized_abort_reason: Option<String>,
     /// Null or an algorithm accepting nothing.
-    next_manual_redirect_steps: Option,
+    next_manual_redirect_steps: Option<usize>,
 }
 
 struct FetchParams {
@@ -42,13 +44,13 @@ struct FetchParams {
     /// Null or an algorithm.
     response_consume_body: Option<Response>,
     /// Null, a global object, or a parallel queue.
-    task_destination: Option,
+    task_destination: Option<usize>,
     cross_origin_isolated_capability: bool,
     /// controller (default a new fetch controller)
     controlller: FetchController,
     timing_info: FetchTimeInfo,
     /// Null, "pending", or a response.
-    preloaded_response_candidate: Option,
+    preloaded_response_candidate: Option<usize>,
 }
 
 /// A fetch timing info is a struct used to maintain timing information needed by Resource Timing
@@ -71,7 +73,7 @@ struct FetchTimeInfo {
     /// default 0
     final_network_response_start_time: usize,
     /// default 0
-    end_time: DOMHighResTimeStamp,
+    end_time: usize,
     /// Null or a connection timing info.
     final_connection_timing_info: Option<ConnectionTimingInfo>,
     server_timing_headers: Vec<String>,
@@ -83,5 +85,5 @@ struct ResponseBodyInfo {
     encoded_size: usize,
     decoded_size: usize,
     /// An ASCII string.
-    content_type: bytes,
+    content_type: Bytes,
 }
