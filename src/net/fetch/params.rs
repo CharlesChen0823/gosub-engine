@@ -8,6 +8,16 @@ enum State {
     Aborted,
 }
 
+pub trait FetchTarget {
+    // add code here
+    fn process_request_body_chunk(&mut self, request: &Request);
+    fn process_request_eof_body(&mut self, request: &Request);
+    fn process_early_hints_response(&mut self, response: &Response);
+    fn process_response(&mut self, response: &Response);
+    fn process_response_eof_body(&mut self, response: &Response);
+    fn process_response_consume_body(&mut self, response: &Response);
+}
+
 /// A fetch controller is a struct used to enable callers of fetch to perform certain operations on it after it has started.
 struct FetchController {
     /// state (default "ongoing")
