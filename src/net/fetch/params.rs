@@ -2,13 +2,20 @@ use crate::bytes::Bytes;
 use crate::net::request::Request;
 use crate::net::response::Response;
 
-enum State {
+enum ControlContextState {
     Ongoing,
     Terminated,
     Aborted,
 }
 
-struct ConnectionTimingInfo {}
+struct ConnectionTimingInfo {
+    pub domain_lookup_start_time: usize,
+    pub domain_lookup_end_tim: usize,
+    pub connection_start_time: usize,
+    pub connection_end_time: usize,
+    pub secure_connection_start_time: usize,
+    pub alpn_negotiated_protocol: Vec<Bytes>,
+}
 
 pub trait FetchTarget {
     // add code here
@@ -21,9 +28,9 @@ pub trait FetchTarget {
 }
 
 /// A fetch controller is a struct used to enable callers of fetch to perform certain operations on it after it has started.
-struct FetchController {
+pub struct FetchControlContext {
     /// state (default "ongoing")
-    state: State,
+    state: ControlContextState,
     full_timing_info: Option<FetchTimeInfo>,
     /// Null or an algorithm accepting a global object.
     report_timing_steps: Option<usize>,
@@ -33,29 +40,9 @@ struct FetchController {
     next_manual_redirect_steps: Option<usize>,
 }
 
-struct FetchParams {
-    /// A request.
-    request: Request,
-    request_body_chunk_length: Option<usize>,
-    request_end_of_body: Option<usize>,
-    early_hints_respone: Option<Response>,
-    response: Option<Response>,
-    response_end_of_body: Option<Response>,
-    /// Null or an algorithm.
-    response_consume_body: Option<Response>,
-    /// Null, a global object, or a parallel queue.
-    task_destination: Option<usize>,
-    cross_origin_isolated_capability: bool,
-    /// controller (default a new fetch controller)
-    controlller: FetchController,
-    timing_info: FetchTimeInfo,
-    /// Null, "pending", or a response.
-    preloaded_response_candidate: Option<usize>,
-}
-
 /// A fetch timing info is a struct used to maintain timing information needed by Resource Timing
 /// and Navigation Timing.
-struct FetchTimeInfo {
+pub struct FetchTimeInfo {
     /// default 0
     start_time: usize,
     /// default 0
