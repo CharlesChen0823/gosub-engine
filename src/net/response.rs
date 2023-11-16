@@ -24,7 +24,21 @@ pub enum CacheState {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ResponseBodyInfo {}
+pub struct ResponseBodyInfo {
+    pub encode_size: usize,
+    pub decode_size: usize,
+    pub content_type: String,
+}
+
+impl ResponseBodyInfo {
+    fn new() -> Self {
+        Self {
+            encode_size: 0,
+            decode_size: 0,
+            content_type: String::new(),
+        }
+    }
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TimingInfo {}
@@ -52,7 +66,7 @@ pub struct Response {
     pub range_requested: bool,
     pub request_includes_credentials: bool,
     pub timing_allow_passed: bool,
-    // pub body_info: ResponseBodyInfo,
+    pub body_info: ResponseBodyInfo,
     pub worker_timing_info: Option<TimingInfo>,
     pub has_cross_origin_redirects: bool,
 }
@@ -73,6 +87,7 @@ impl Response {
             range_requested: false,
             request_includes_credentials: true,
             timing_allow_passed: false,
+            body_info: ResponseBodyInfo::new(),
             worker_timing_info: None,
             has_cross_origin_redirects: false,
         }
@@ -93,6 +108,7 @@ impl Response {
             range_requested: false,
             request_includes_credentials: true,
             timing_allow_passed: false,
+            body_info: ResponseBodyInfo::new(),
             worker_timing_info: None,
             has_cross_origin_redirects: false,
         }
@@ -113,6 +129,7 @@ impl Response {
             range_requested: false,
             request_includes_credentials: true,
             timing_allow_passed: false,
+            body_info: ResponseBodyInfo::new(),
             worker_timing_info: None,
             has_cross_origin_redirects: false,
         }
@@ -135,6 +152,5 @@ mod tests {
     fn serialize_response() {
         let response = Response::new(Url::parse("http://www.baidu.com").unwrap());
         println!("------{:?}--------", response);
-
     }
 }
