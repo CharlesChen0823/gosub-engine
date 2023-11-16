@@ -1,13 +1,23 @@
-use content_security_policy::{Destination, Initiator, Origin as CSPOrigin, ParserMetadata};
+use content_security_policy::{Destination, Initiator};
 use http::{HeaderMap, Method};
-use url::Url;
+use serde::{Deserialize, Serialize};
+use url::{Url, Origin};
 
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub enum CredentialsMode {
     Omit,
     SameOrigin,
     Include,
 }
 
+#[derive(Clone, Copy, Debug, Deserialize, Serialize)]
+pub enum ParserMetadata {
+    None,
+    ParserInserted,
+    NotParserInserted,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub enum CacheMode {
     Default,
     NoStore,
@@ -17,24 +27,28 @@ pub enum CacheMode {
     OnlyIfCached,
 }
 
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub enum RedirectMode {
     Follow,
     Error,
     Manual,
 }
 
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub enum ResponseTaintingMode {
     Basic,
     CORS,
     Opaque,
 }
 
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub enum Referrer {
     NoReferrer,
     Client,
     Url(Url),
 }
 
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub enum ReferrerPolicy {
     None,
     NoReferrer,
@@ -47,6 +61,7 @@ pub enum ReferrerPolicy {
     UnsafeUrl,
 }
 
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub enum Mode {
     SameOrigin,
     CORS,
@@ -55,11 +70,7 @@ pub enum Mode {
     Websocket,
 }
 
-pub enum Origin {
-    Client,
-    Origin(CSPOrigin),
-}
-
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub enum ServiceWorkerMode {
     /// Relevant service workers will get a fetch event for this fetch.
     ALL,
@@ -67,6 +78,7 @@ pub enum ServiceWorkerMode {
     NONE,
 }
 
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub enum InitiatorType {
     None,
     Audio,
@@ -93,22 +105,52 @@ pub enum InitiatorType {
 }
 
 /// A request has an associated priority, which is "high", "low", or "auto". Unless stated otherwise it is "auto".
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub enum Priority {
     High,
     Low,
     Auto,
 }
 
-pub struct RequestBody {}
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub enum BodySource {
+    Null,
+    ByteSequence,
+    Object,
+}
 
+pub trait ReadableStream {}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct StreamReader {}
+
+impl ReadableStream for StreamReader {}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct RequestBody {
+    stream: StreamReader,
+    source: BodySource,
+    lenght: Option<usize>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct Window {}
 
 /// https://fetch.spec.whatwg.org/#concept-request
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct Request {
     /// This can be updated during redirects to `GET` as described in HTTP fetch.
+    #[serde(
+        deserialize_with = "hyper_serde::deserialize",
+        serialize_with = "hyper_serde::serialize"
+    )]
     pub method: Method,
     /// A request has an associated local-URLs-only flag. Unless stated otherwise it is unset.
     pub local_urls_only: bool,
+    #[serde(
+        deserialize_with = "hyper_serde::deserialize",
+        serialize_with = "hyper_serde::serialize"
+    )]
     pub header_list: HeaderMap,
     /// A request has an associated unsafe-request flag. Unless stated otherwise it is unset.
     ///
@@ -140,7 +182,7 @@ pub struct Request {
     pub priority: Priority,
     /// A request has an associated internal priority (null or an implementation-defined object). Unless otherwise stated it is null.
     pub internal_priority: Option<String>,
-    pub origin: Origin,
+    // pub origin: Origin,
     /// A request has an associated policy container, which is "client" or a policy container. Unless stated otherwise it is "client".
     ///
     /// "client" is changed to a policy container during fetching. It provides a convenient way for standards to not have to set request’s policy container.
@@ -187,7 +229,7 @@ impl Request {
             destination: Destination::None,
             priority: Priority::Auto,
             internal_priority: None,
-            origin: Origin::Client,
+            // origin: Origin::Opaque(()),
             policy_container: String::from("client"),
             referrer: Referrer::Client,
             referrer_policy: ReferrerPolicy::None,

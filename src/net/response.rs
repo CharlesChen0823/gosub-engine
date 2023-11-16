@@ -1,7 +1,9 @@
 use http::status::StatusCode;
 use http::HeaderMap;
+use serde::{Deserialize, Serialize};
 use url::Url;
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum ResponseType {
     Basic,
     Cors,
@@ -11,25 +13,38 @@ pub enum ResponseType {
     OpaqueRedirect,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ResponseBody {}
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum CacheState {
     None,
     Local,
     Validated,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ResponseBodyInfo {}
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TimingInfo {}
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Response {
     pub response_type: ResponseType,
     pub aborted: bool,
     pub url: Option<Url>,
     pub url_list: Vec<Url>,
-    pub statue: StatusCode,
-    pub statue_message: String,
+    #[serde(
+        deserialize_with = "hyper_serde::deserialize",
+        serialize_with = "hyper_serde::serialize"
+    )]
+    pub status: StatusCode,
+    pub status_message: String,
+    #[serde(
+        deserialize_with = "hyper_serde::deserialize",
+        serialize_with = "hyper_serde::serialize"
+    )]
     pub header: HeaderMap,
     pub body: Option<ResponseBody>,
     pub cache_state: CacheState,
@@ -49,8 +64,8 @@ impl Response {
             aborted: false,
             url: Some(url),
             url_list: vec![],
-            statue: StatusCode::OK,
-            statue_message: String::new(),
+            status: StatusCode::OK,
+            status_message: String::new(),
             header: HeaderMap::new(),
             body: None,
             cache_state: CacheState::None,
@@ -69,8 +84,8 @@ impl Response {
             aborted: false,
             url: None,
             url_list: vec![],
-            statue: StatusCode::OK,
-            statue_message: String::new(),
+            status: StatusCode::OK,
+            status_message: String::new(),
             header: HeaderMap::new(),
             body: None,
             cache_state: CacheState::None,
@@ -89,8 +104,8 @@ impl Response {
             aborted: true,
             url: None,
             url_list: vec![],
-            statue: StatusCode::OK,
-            statue_message: String::new(),
+            status: StatusCode::OK,
+            status_message: String::new(),
             header: HeaderMap::new(),
             body: None,
             cache_state: CacheState::None,
@@ -106,8 +121,20 @@ impl Response {
     pub fn to_filtered(self, filter_type: ResponseType) -> Response {
         match filter_type {
             ResponseType::Default | ResponseType::Error => panic!("unreachable"),
-            _ => () 
+            _ => (),
         }
         Response::new(self.url.unwrap())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn serialize_response() {
+        let response = Response::new(Url::parse("http://www.baidu.com").unwrap());
+        println!("------{:?}--------", response);
+
     }
 }
