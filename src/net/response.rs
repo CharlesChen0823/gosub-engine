@@ -41,7 +41,26 @@ impl ResponseBodyInfo {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct TimingInfo {}
+pub struct ServiceWorkerTimingInfo {
+    start_time: usize,
+    fetch_event_dispatch_time: usize,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ResponseInit {
+    #[serde(
+        deserialize_with = "hyper_serde::deserialize",
+        serialize_with = "hyper_serde::serialize"
+    )]
+    pub status: StatusCode,
+    pub status_message: String,
+    #[serde(
+        deserialize_with = "hyper_serde::deserialize",
+        serialize_with = "hyper_serde::serialize"
+    )]
+    pub header: HeaderMap,
+}
+
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Response {
@@ -67,7 +86,8 @@ pub struct Response {
     pub request_includes_credentials: bool,
     pub timing_allow_passed: bool,
     pub body_info: ResponseBodyInfo,
-    pub worker_timing_info: Option<TimingInfo>,
+    pub worker_timing_info: Option<ServiceWorkerTimingInfo>,
+    pub internal_response: Option<Box<Response>>,
     pub has_cross_origin_redirects: bool,
 }
 
@@ -89,6 +109,7 @@ impl Response {
             timing_allow_passed: false,
             body_info: ResponseBodyInfo::new(),
             worker_timing_info: None,
+            internal_response: None,
             has_cross_origin_redirects: false,
         }
     }
@@ -110,6 +131,7 @@ impl Response {
             timing_allow_passed: false,
             body_info: ResponseBodyInfo::new(),
             worker_timing_info: None,
+            internal_response: None,
             has_cross_origin_redirects: false,
         }
     }
@@ -131,6 +153,7 @@ impl Response {
             timing_allow_passed: false,
             body_info: ResponseBodyInfo::new(),
             worker_timing_info: None,
+            internal_response: None,
             has_cross_origin_redirects: false,
         }
     }
