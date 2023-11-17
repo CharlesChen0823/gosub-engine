@@ -62,22 +62,14 @@ pub struct ResponseInit {
 }
 
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone)]
 pub struct Response {
     pub response_type: ResponseType,
     pub aborted: bool,
     pub url: Option<Url>,
     pub url_list: Vec<Url>,
-    #[serde(
-        deserialize_with = "hyper_serde::deserialize",
-        serialize_with = "hyper_serde::serialize"
-    )]
-    pub status: StatusCode,
+    pub status: Option<StatusCode>,
     pub status_message: String,
-    #[serde(
-        deserialize_with = "hyper_serde::deserialize",
-        serialize_with = "hyper_serde::serialize"
-    )]
     pub header: HeaderMap,
     pub body: Option<ResponseBody>,
     pub cache_state: CacheState,
@@ -98,7 +90,7 @@ impl Response {
             aborted: false,
             url: Some(url),
             url_list: vec![],
-            status: StatusCode::OK,
+            status: Some(StatusCode::OK),
             status_message: String::new(),
             header: HeaderMap::new(),
             body: None,
@@ -120,7 +112,7 @@ impl Response {
             aborted: false,
             url: None,
             url_list: vec![],
-            status: StatusCode::OK,
+            status: None,
             status_message: String::new(),
             header: HeaderMap::new(),
             body: None,
@@ -142,7 +134,7 @@ impl Response {
             aborted: true,
             url: None,
             url_list: vec![],
-            status: StatusCode::OK,
+            status: None,
             status_message: String::new(),
             header: HeaderMap::new(),
             body: None,
