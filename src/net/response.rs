@@ -61,7 +61,6 @@ pub struct ResponseInit {
     pub header: HeaderMap,
 }
 
-
 #[derive(Debug, Clone)]
 pub struct Response {
     pub response_type: ResponseType,
@@ -103,6 +102,14 @@ impl Response {
             worker_timing_info: None,
             internal_response: None,
             has_cross_origin_redirects: false,
+        }
+    }
+
+    pub fn actual_response(self) -> Response {
+        if self.internal_response.is_some() {
+            *self.internal_response.unwrap()
+        } else {
+            self
         }
     }
 
