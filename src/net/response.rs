@@ -128,28 +128,6 @@ impl Response {
         }
     }
 
-    pub fn aborted_network_error(self) -> Response {
-        Self {
-            response_type: ResponseType::Error,
-            aborted: true,
-            url: None,
-            url_list: vec![],
-            status: None,
-            status_message: String::new(),
-            header: HeaderMap::new(),
-            body: None,
-            cache_state: CacheState::None,
-            cors_exposed_header: vec![],
-            range_requested: false,
-            request_includes_credentials: true,
-            timing_allow_passed: false,
-            body_info: ResponseBodyInfo::new(),
-            worker_timing_info: None,
-            internal_response: None,
-            has_cross_origin_redirects: false,
-        }
-    }
-
     pub fn to_filtered(self, filter_type: ResponseType) -> Response {
         match filter_type {
             ResponseType::Default | ResponseType::Error => panic!("unreachable"),
