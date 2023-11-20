@@ -1,4 +1,3 @@
-
 /// A fetch params is a struct used as a bookkeeping detail by the fetch algorithm. It has the following items:
 ///
 /// request: A request.
@@ -10,6 +9,14 @@
 /// process response end-of-body (default null)
 /// process response consume body (default null)
 /// Null or an algorithm.
+pub trait FetchContext {
+    fn process_request_body_chunk();
+    fn process_request_eof_body();
+    fn process_early_hints_response();
+    fn process_response();
+    fn process_response_eof_body();
+    fn process_response_consume_body();
+}
 ///
 /// task destination (default null)
 /// Null, a global object, or a parallel queue.
