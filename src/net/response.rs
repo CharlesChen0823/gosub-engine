@@ -113,7 +113,7 @@ impl Response {
         }
     }
 
-    pub fn network_error(self) -> Response {
+    pub fn network_error() -> Response {
         Self {
             response_type: ResponseType::Error,
             aborted: false,

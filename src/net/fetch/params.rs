@@ -110,25 +110,33 @@ impl FetchController {
     fn state(&self) {}
 }
 
+/// A connection timing info is a struct used to maintain timing information pertaining to the process of obtaining a connection. It has the following items:
+#[derive(Default, Debug, Clone)]
+pub struct ConnectionTimingInfo {
+    domain_lookup_start_time: usize,
+    domain_lookup_end_time: usize,
+    start_time: usize,
+    end_time: usize,
+    secure_connection_start_time: usize,
+    alpn_negotiated_protocol: Vec<String>,
+}
+
 /// A fetch timing info is a struct used to maintain timing information needed by Resource Timing and Navigation Timing. It has the following items: [RESOURCE-TIMING] [NAVIGATION-TIMING]
-///
-/// start time (default 0)
-/// redirect start time (default 0)
-/// redirect end time (default 0)
-/// post-redirect start time (default 0)
-/// final service worker start time (default 0)
-/// final network-request start time (default 0)
-/// first interim network-response start time (default 0)
-/// final network-response start time (default 0)
-/// end time (default 0)
-/// A DOMHighResTimeStamp.
-/// final connection timing info (default null)
-/// Null or a connection timing info.
-/// server-timing headers (default « »)
-/// A list of strings.
-/// render-blocking (default false)
-/// A boolean.
-pub struct FetchTimingInfo {}
+#[derive(Default, Debug, Clone)]
+pub struct FetchTimingInfo {
+    start_time: usize,
+    redirect_start_time: usize,
+    redirect_end_time: usize,
+    post_redirect_start_time: usize,
+    final_service_worker_start_time: usize,
+    final_network_request_start_time: usize,
+    first_interim_network_response_start_time: usize,
+    final_network_response_start_time: usize,
+    end_time: usize,
+    final_connection_timing_info: Option<ConnectionTimingInfo>,
+    server_timing_headers: Vec<String>,
+    render_blocking: bool,
+}
 
 /// A response body info is a struct used to maintain information needed by Resource Timing and Navigation Timing. It has the following items: [RESOURCE-TIMING] [NAVIGATION-TIMING]
 ///

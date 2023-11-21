@@ -1,7 +1,7 @@
 use content_security_policy::{Destination, Initiator};
 use http::{HeaderMap, Method};
 use serde::{Deserialize, Serialize};
-use url::{Url, Origin};
+use url::{Origin, Url};
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub enum CredentialsMode {
@@ -27,7 +27,7 @@ pub enum CacheMode {
     OnlyIfCached,
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
 pub enum RedirectMode {
     Follow,
     Error,
@@ -61,7 +61,7 @@ pub enum ReferrerPolicy {
     UnsafeUrl,
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
 pub enum Mode {
     SameOrigin,
     CORS,

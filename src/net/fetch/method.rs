@@ -1,4 +1,5 @@
-use crate::net::request::Request;
+use crate::net::request::{Mode, RedirectMode, Referrer, ReferrerPolicy, ResponseTaintingMode};
+use crate::net::{request::Request, response::Response};
 
 use super::params::{FetchContext, FetchController};
 
@@ -7,7 +8,12 @@ use super::params::{FetchContext, FetchController};
 /// 8. If request’s body is a byte sequence, then set request’s body to request’s body as a body.
 /// 9. If request’s window is "client", then set request’s window to request’s client, if request’s client’s global object is a Window object; otherwise "no-window".
 /// 10. If request’s origin is "client", then set request’s origin to request’s client’s origin.
-pub fn fetch(request: Request, context: impl FetchContext, controller: FetchController) {
+pub fn fetch(
+    request: Request,
+    context: impl FetchContext,
+    controller: FetchController,
+    use_parallel_queue: Option<bool>,
+) {
     // 1. Assert: request’s mode is "navigate" or processEarlyHintsResponse is null.
     // Processing of early hints (responses whose status is 103) is only vetted for navigations.
 
@@ -20,7 +26,8 @@ pub fn fetch(request: Request, context: impl FetchContext, controller: FetchCont
     // 4.1 Set taskDestination to request’s client’s global object.
     // 4.2 Set crossOriginIsolatedCapability to request’s client’s cross-origin isolated capability.
 
-    // 5. If useParallelQueue is true, then set taskDestination to the result of starting a new parallel queue.
+    // 5. set taskDestination to the result of starting a new parallel queue.
+    if use_parallel_queue.is_some() {}
     //
     // 11. If all of the following conditions are true:
     //      request’s URL’s scheme is an HTTP(S) scheme
@@ -65,4 +72,203 @@ pub fn fetch(request: Request, context: impl FetchContext, controller: FetchCont
     // 17. Run main fetch given fetchParams.
     //
     // 18. Return fetchParams’s controller.
+}
+
+pub fn report_csp_violations(request: &Request) {}
+
+pub fn upgrade_request_trustworthy_url(request: &mut Request) {}
+pub fn upgrade_mixed_content_request_trustworthy_url(request: &mut Request) {}
+pub fn should_be_blocked_due_bad_port(request: &Request) -> bool {
+    false
+}
+pub fn should_fetching_blocked_as_mixed_content(request: &Request) -> bool {
+    false
+}
+pub fn should_request_blocked_by_csp(request: &Request) -> bool {
+    false
+}
+
+pub fn determine_request_referrer(request: &Request) -> Referrer {
+    Referrer::Client
+}
+
+pub async fn scheme_fetch(request: &mut Request) -> Response {
+    Response::new(url::Url::parse("www.bing.com").unwrap())
+}
+
+pub async fn http_fetch(request: &mut Request) -> Response {
+    Response::new(url::Url::parse("www.bing.com").unwrap())
+}
+
+pub async fn main_fetch(
+    request: &mut Request,
+    recursive: bool,
+    context: impl FetchContext,
+) -> Response {
+    // 1. Let request be fetchParams’s request.
+    // 2. Let response be null.
+    let mut response = None;
+
+    // 3. If request’s local-URLs-only flag is set and request’s current URL is not local, then set response to a network error.
+    if request.local_urls_only {
+        if !matches!(request.current_url().scheme(), "about" | "blob" | "data") {
+            response = Some(Response::network_error());
+        }
+    };
+    // 4.
+    report_csp_violations(request);
+    // 5.
+    upgrade_request_trustworthy_url(request);
+    // 6.
+    upgrade_mixed_content_request_trustworthy_url(request);
+    // 7.
+    if should_be_blocked_due_bad_port(request)
+        || should_fetching_blocked_as_mixed_content(request)
+        || should_request_blocked_by_csp(request)
+    {
+        response = Some(Response::network_error());
+    }
+
+    // 8.
+    if let ReferrerPolicy::None = request.referrer_policy {
+        // set request’s referrer policy to request’s policy container’s referrer policy.
+    }
+    //
+    // 9.
+    if let Referrer::NoReferrer = request.referrer {
+    } else {
+        determine_request_referrer(request);
+    }
+    // 10. Set request’s current URL’s scheme to "https" if all of the following conditions are true:
+    //      request’s current URL’s scheme is "http"
+    //      request’s current URL’s host is a domain
+    //      Matching request’s current URL’s host per Known HSTS Host Domain Name Matching results in either a superdomain match with an asserted includeSubDomains directive or a congruent match (with or without an asserted includeSubDomains directive) [HSTS]; or DNS resolution for the request finds a matching HTTPS RR per section 9.5 of [SVCB]. [HSTS] [SVCB]
+    //
+    // 11.
+    if !recursive {
+        // then run the remaining steps in parallel.
+    }
+    //
+    // 12. If response is null, then set response to the result of running the steps corresponding to the first matching statement:
+    let mut response = match response {
+        Some(res) => res,
+        None => {
+            // 12.1 fetchParams’s preloaded response candidate is non-null
+            //      Wait until fetchParams’s preloaded response candidate is not "pending".
+            //      Assert: fetchParams’s preloaded response candidate is a response.
+            //      Return fetchParams’s preloaded response candidate.
+            //
+            // 12.2 request’s current URL’s origin is same origin with request’s origin, and request’s response tainting is "basic"
+            if request.current_url().scheme() == "data" {
+                request.response_tainting = ResponseTaintingMode::Basic;
+                scheme_fetch(request).await
+            } else if request.mode == Mode::Navigate || request.mode == Mode::Websocket {
+                request.response_tainting = ResponseTaintingMode::Basic;
+                scheme_fetch(request).await
+            } else if request.mode == Mode::SameOrigin {
+                Response::network_error()
+            } else if request.mode == Mode::NoCORS {
+                if request.redirect_mode == RedirectMode::Follow {
+                    request.response_tainting = ResponseTaintingMode::Opaque;
+                    scheme_fetch(request).await
+                } else {
+                    Response::network_error()
+                }
+            } else if request.current_url().scheme() != "http" {
+                // request’s current URL’s scheme is not an HTTP(S) scheme
+                Response::network_error()
+            } else if request.use_cors_preflight || request.unsafe_request {
+                //  and either request’s method is not a CORS-safelisted method or CORS-unsafe request-header names with request’s header list is not empty
+                request.response_tainting = ResponseTaintingMode::CORS;
+                // Let corsWithPreflightResponse be the result of running HTTP fetch given fetchParams and true.
+                //
+                // If corsWithPreflightResponse is a network error, then clear cache entries using request.
+                //
+                // Return corsWithPreflightResponse.
+                http_fetch(request).await
+            } else {
+                request.response_tainting = ResponseTaintingMode::CORS;
+                http_fetch(request).await
+            }
+            //
+            // HTML assigns any documents and workers created from URLs whose scheme is "data" a unique opaque origin. Service workers can only be created from URLs whose scheme is an HTTP(S) scheme. [HTML] [SW]
+            //
+        }
+    };
+    //
+    // 13.
+    if recursive {
+        return response;
+    }
+    //
+    // If response is not a network error and response is not a filtered response, then:
+    //
+    // If request’s response tainting is "cors", then:
+    //
+    // Let headerNames be the result of extracting header list values given `Access-Control-Expose-Headers` and response’s header list.
+    //
+    // If request’s credentials mode is not "include" and headerNames contains `*`, then set response’s CORS-exposed header-name list to all unique header names in response’s header list.
+    //
+    // Otherwise, if headerNames is non-null or failure, then set response’s CORS-exposed header-name list to headerNames.
+    //
+    // One of the headerNames can still be `*` at this point, but will only match a header whose name is `*`.
+    //
+    // Set response to the following filtered response with response as its internal response, depending on request’s response tainting:
+    //
+    // "basic"
+    // basic filtered response
+    // "cors"
+    // CORS filtered response
+    // "opaque"
+    // opaque filtered response
+    // Let internalResponse be response, if response is a network error; otherwise response’s internal response.
+    //
+    // If internalResponse’s URL list is empty, then set it to a clone of request’s URL list.
+    //
+    // A response’s URL list can be empty, e.g., when fetching an about: URL.
+    //
+    // If request has a redirect-tainted origin, then set internalResponse’s has-cross-origin-redirects to true.
+    //
+    // If request’s timing allow failed flag is unset, then set internalResponse’s timing allow passed flag.
+    //
+    // If response is not a network error and any of the following returns blocked
+    //
+    // should internalResponse to request be blocked as mixed content
+    //
+    // should internalResponse to request be blocked by Content Security Policy
+    //
+    // should internalResponse to request be blocked due to its MIME type
+    //
+    // should internalResponse to request be blocked due to nosniff
+    //
+    // then set response and internalResponse to a network error.
+    //
+    // If response’s type is "opaque", internalResponse’s status is 206, internalResponse’s range-requested flag is set, and request’s header list does not contain `Range`, then set response and internalResponse to a network error.
+    //
+    // Traditionally, APIs accept a ranged response even if a range was not requested. This prevents a partial response from an earlier ranged request being provided to an API that did not make a range request.
+    //
+    // Further details
+    // If response is not a network error and either request’s method is `HEAD` or `CONNECT`, or internalResponse’s status is a null body status, set internalResponse’s body to null and disregard any enqueuing toward it (if any).
+    //
+    // This standardizes the error handling for servers that violate HTTP.
+    //
+    // If request’s integrity metadata is not the empty string, then:
+    //
+    // Let processBodyError be this step: run fetch response handover given fetchParams and a network error.
+    //
+    // If response’s body is null, then run processBodyError and abort these steps.
+    //
+    // Let processBody given bytes be these steps:
+    //
+    // If bytes do not match request’s integrity metadata, then run processBodyError and abort these steps. [SRI]
+    //
+    // Set response’s body to bytes as a body.
+    //
+    // Run fetch response handover given fetchParams and response.
+    //
+    // Fully read response’s body given processBody and processBodyError.
+    //
+    // Otherwise, run fetch response handover given fetchParams and response.
+
+    Response::new(url::Url::parse("www.bing.com").unwrap())
 }
