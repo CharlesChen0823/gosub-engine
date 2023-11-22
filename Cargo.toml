@@ -47,6 +47,7 @@ url = {version = "2.4.1", features = ["serde"]}
 http = "0.2.11"
 content-security-policy = {version = "0.5.1", features = ["serde"]}
 hyper_serde = "0.13.2"
+mime = "0.3.17"
 
 [dev-dependencies]
 criterion = { version = "0.5", features = ["html_reports"] }

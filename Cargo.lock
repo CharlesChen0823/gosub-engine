@@ -462,6 +462,7 @@ dependencies = [
  "http",
  "hyper_serde",
  "lazy_static",
+ "mime",
  "nom",
  "nom_locate",
  "phf",
