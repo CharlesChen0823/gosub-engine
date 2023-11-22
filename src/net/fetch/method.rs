@@ -1,5 +1,6 @@
 use crate::net::request::{
-    is_cors_safelisted_method, Mode, RedirectMode, Referrer, ReferrerPolicy, ResponseTaintingMode,
+    get_cors_unsafe_request_header_names, is_cors_safelisted_method, Mode, RedirectMode, Referrer,
+    ReferrerPolicy, ResponseTaintingMode,
 };
 use crate::net::{request::Request, response::Response};
 
@@ -181,9 +182,9 @@ pub async fn main_fetch(
                 Response::network_error()
             } else if request.use_cors_preflight
                 || (request.unsafe_request
-                    && (!is_cors_safelisted_method(&request.method) || false))
+                    && (!is_cors_safelisted_method(&request.method)
+                        || !get_cors_unsafe_request_header_names(&request.header_list).is_empty()))
             {
-                //   or CORS-unsafe request-header names with request’s header list is not empty
                 request.response_tainting = ResponseTaintingMode::CORS;
                 // Let corsWithPreflightResponse be the result of running HTTP fetch given fetchParams and true.
                 //

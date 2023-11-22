@@ -1,4 +1,5 @@
 use content_security_policy::{Destination, Initiator};
+use http::header::HeaderName;
 use http::{HeaderMap, Method};
 use mime::Mime;
 use serde::{Deserialize, Serialize};
@@ -397,4 +398,31 @@ pub fn is_cors_safelisted_request_header<N: AsRef<str>, V: AsRef<[u8]>>(
         "range" => return true,
         _ => return false,
     }
+}
+
+pub fn convert_header_names_to_sorted_lowercase_set(
+    header_name: Vec<&HeaderName>,
+) -> Vec<HeaderName> {
+    let mut header_set = header_name.to_vec();
+    header_set.sort_by(|a, b| a.as_str().partial_cmp(b.as_str()).unwrap());
+    header_set.dedup();
+    return header_set.into_iter().cloned().collect();
+}
+
+pub fn get_cors_unsafe_request_header_names(header: &HeaderMap) -> Vec<HeaderName> {
+    let mut unsafe_names: Vec<&HeaderName> = vec![];
+    let mut potentially_unsafe_names: Vec<&HeaderName> = vec![];
+    let mut safelist_value_size = 0;
+    for (name, value) in header {
+        if !is_cors_safelisted_request_header(&name, &value) {
+            unsafe_names.push(name);
+        } else {
+            potentially_unsafe_names.push(name);
+            safelist_value_size += value.as_ref().len();
+        }
+    }
+    if safelist_value_size > 1024 {
+        unsafe_names.extend_from_slice(&potentially_unsafe_names);
+    }
+    return convert_header_names_to_sorted_lowercase_set(unsafe_names);
 }
