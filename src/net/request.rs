@@ -5,7 +5,7 @@ use mime::Mime;
 use serde::{Deserialize, Serialize};
 use url::{Origin, Url};
 
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
 pub enum CredentialsMode {
     Omit,
     SameOrigin,

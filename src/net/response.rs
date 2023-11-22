@@ -1,3 +1,4 @@
+use headers::HeaderMapExt;
 use http::status::StatusCode;
 use http::HeaderMap;
 use serde::{Deserialize, Serialize};

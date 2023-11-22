@@ -1,8 +1,9 @@
-use http::HeaderName;
+use headers::{AccessControlExposeHeaders, HeaderMapExt};
+use http::header::{HeaderMap, HeaderName};
 
 use crate::net::request::{
-    get_cors_unsafe_request_header_names, is_cors_safelisted_method, Mode, RedirectMode, Referrer,
-    ReferrerPolicy, ResponseTaintingMode,
+    get_cors_unsafe_request_header_names, is_cors_safelisted_method, CredentialsMode, Mode,
+    RedirectMode, Referrer, ReferrerPolicy, ResponseTaintingMode,
 };
 use crate::net::response::ResponseType;
 use crate::net::{request::Request, response::Response};
@@ -209,13 +210,27 @@ pub async fn main_fetch(
     if !response.is_network_error() && response.internal_response.is_none() {
         // 14.1
         if request.response_tainting == ResponseTaintingMode::CORS {
-            // Let headerNames be the result of extracting header list values given `Access-Control-Expose-Headers` and response’s header list.
-            //
-            // If request’s credentials mode is not "include" and headerNames contains `*`, then set response’s CORS-exposed header-name list to all unique header names in response’s header list.
-            //
-            // Otherwise, if headerNames is non-null or failure, then set response’s CORS-exposed header-name list to headerNames.
-            //
-            // One of the headerNames can still be `*` at this point, but will only match a header whose name is `*`.
+            let header_names: Option<Vec<HeaderName>> = response
+                .header
+                .typed_get::<AccessControlExposeHeaders>()
+                .map(|v| v.iter().collect());
+            match header_names {
+                Some(ref list)
+                    if request.credentials_mode != CredentialsMode::Include
+                        && list.iter().any(|header| header == "*") =>
+                {
+                    response.cors_exposed_header = response
+                        .header
+                        .iter()
+                        .map(|(name, _)| name.as_str().to_owned())
+                        .collect();
+                }
+                Some(list) => {
+                    response.cors_exposed_header =
+                        list.iter().map(|h| h.as_str().to_owned()).collect();
+                }
+                _ => (),
+            }
         }
         let filter_type = match request.response_tainting {
             ResponseTaintingMode::CORS => ResponseType::Cors,
