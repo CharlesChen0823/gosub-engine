@@ -1,5 +1,4 @@
-// use http::HeaderName;
-use http::header::HeaderName;
+use http::HeaderName;
 
 use crate::net::request::{
     get_cors_unsafe_request_header_names, is_cors_safelisted_method, Mode, RedirectMode, Referrer,
@@ -225,27 +224,32 @@ pub async fn main_fetch(
         };
         response = response.to_filtered(filter_type);
     }
-    // Let internalResponse be response, if response is a network error; otherwise response’s internal response.
-    //
-    // If internalResponse’s URL list is empty, then set it to a clone of request’s URL list.
-    //
-    // A response’s URL list can be empty, e.g., when fetching an about: URL.
-    //
-    // If request has a redirect-tainted origin, then set internalResponse’s has-cross-origin-redirects to true.
-    //
-    // If request’s timing allow failed flag is unset, then set internalResponse’s timing allow passed flag.
-    //
-    // If response is not a network error and any of the following returns blocked
-    //
-    // should internalResponse to request be blocked as mixed content
-    //
-    // should internalResponse to request be blocked by Content Security Policy
-    //
-    // should internalResponse to request be blocked due to its MIME type
-    //
-    // should internalResponse to request be blocked due to nosniff
-    //
+    // 19. If response is not a network error and any of the following returns blocked
+    //      should internalResponse to request be blocked as mixed content
+    //      should internalResponse to request be blocked by Content Security Policy
+    //      should internalResponse to request be blocked due to its MIME type
+    //      should internalResponse to request be blocked due to nosniff
     // then set response and internalResponse to a network error.
+    let response_is_network_error = response.is_network_error();
+
+    // 15.
+    let mut internal_response = if response.is_network_error() {
+        response
+    } else {
+        *response.internal_response.unwrap()
+    };
+    // 16.
+    if internal_response.url_list.is_empty() {
+        internal_response.url_list = request.url_list.clone();
+    }
+    // 17.
+    if request.is_redirect_tainted_origin() {
+        internal_response.has_cross_origin_redirects = true;
+    }
+    // 18.
+    if !request.timing_allow_failed {
+        internal_response.timing_allow_passed = true;
+    }
     //
     // If response’s type is "opaque", internalResponse’s status is 206, internalResponse’s range-requested flag is set, and request’s header list does not contain `Range`, then set response and internalResponse to a network error.
     //

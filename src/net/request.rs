@@ -292,6 +292,16 @@ impl Request {
         }
     }
 
+    pub fn is_redirect_tainted_origin(&self) -> bool {
+        // Let lastURL be null.
+        // For each url of request’s URL list:
+        // If lastURL is null, then set lastURL to url and continue.
+        // If url’s origin is not same origin with lastURL’s origin and request’s origin is not same origin with lastURL’s origin, then return true.
+        // Set lastURL to url.
+        // Return false.
+        false
+    }
+
     pub fn is_nonsubresouce_request(&self) -> bool {
         match self.destination {
             Destination::Document
