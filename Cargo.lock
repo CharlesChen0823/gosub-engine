@@ -459,6 +459,7 @@ dependencies = [
  "content-security-policy",
  "criterion",
  "derive_more",
+ "headers",
  "http",
  "hyper_serde",
  "lazy_static",
