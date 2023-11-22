@@ -36,7 +36,7 @@ pub enum RedirectMode {
     Manual,
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
 pub enum ResponseTaintingMode {
     Basic,
     CORS,

@@ -135,6 +135,13 @@ impl Response {
         }
     }
 
+    pub fn is_network_error(&self) -> bool {
+        match self.response_type {
+            ResponseType::Error => true,
+            _ => false,
+        }
+    }
+
     pub fn to_filtered(self, filter_type: ResponseType) -> Response {
         match filter_type {
             ResponseType::Default | ResponseType::Error => panic!("unreachable"),

@@ -1,7 +1,11 @@
+// use http::HeaderName;
+use http::header::HeaderName;
+
 use crate::net::request::{
     get_cors_unsafe_request_header_names, is_cors_safelisted_method, Mode, RedirectMode, Referrer,
     ReferrerPolicy, ResponseTaintingMode,
 };
+use crate::net::response::ResponseType;
 use crate::net::{request::Request, response::Response};
 
 use super::params::{FetchContext, FetchController};
@@ -177,8 +181,7 @@ pub async fn main_fetch(
                 } else {
                     Response::network_error()
                 }
-            } else if request.current_url().scheme() != "http" {
-                // request’s current URL’s scheme is not an HTTP(S) scheme
+            } else if !matches!(request.current_url().scheme(), "http" | "https") {
                 Response::network_error()
             } else if request.use_cors_preflight
                 || (request.unsafe_request
@@ -186,19 +189,15 @@ pub async fn main_fetch(
                         || !get_cors_unsafe_request_header_names(&request.header_list).is_empty()))
             {
                 request.response_tainting = ResponseTaintingMode::CORS;
-                // Let corsWithPreflightResponse be the result of running HTTP fetch given fetchParams and true.
-                //
-                // If corsWithPreflightResponse is a network error, then clear cache entries using request.
-                //
-                // Return corsWithPreflightResponse.
-                http_fetch(request).await
+                let response = http_fetch(request).await;
+                if response.is_network_error() {
+                    // then clear cache entries using request.
+                }
+                response
             } else {
                 request.response_tainting = ResponseTaintingMode::CORS;
                 http_fetch(request).await
             }
-            //
-            // HTML assigns any documents and workers created from URLs whose scheme is "data" a unique opaque origin. Service workers can only be created from URLs whose scheme is an HTTP(S) scheme. [HTML] [SW]
-            //
         }
     };
     //
@@ -207,26 +206,25 @@ pub async fn main_fetch(
         return response;
     }
     //
-    // If response is not a network error and response is not a filtered response, then:
-    //
-    // If request’s response tainting is "cors", then:
-    //
-    // Let headerNames be the result of extracting header list values given `Access-Control-Expose-Headers` and response’s header list.
-    //
-    // If request’s credentials mode is not "include" and headerNames contains `*`, then set response’s CORS-exposed header-name list to all unique header names in response’s header list.
-    //
-    // Otherwise, if headerNames is non-null or failure, then set response’s CORS-exposed header-name list to headerNames.
-    //
-    // One of the headerNames can still be `*` at this point, but will only match a header whose name is `*`.
-    //
-    // Set response to the following filtered response with response as its internal response, depending on request’s response tainting:
-    //
-    // "basic"
-    // basic filtered response
-    // "cors"
-    // CORS filtered response
-    // "opaque"
-    // opaque filtered response
+    // 14. If response is not a network error and response is not a filtered response, then:
+    if !response.is_network_error() && response.internal_response.is_none() {
+        // 14.1
+        if request.response_tainting == ResponseTaintingMode::CORS {
+            // Let headerNames be the result of extracting header list values given `Access-Control-Expose-Headers` and response’s header list.
+            //
+            // If request’s credentials mode is not "include" and headerNames contains `*`, then set response’s CORS-exposed header-name list to all unique header names in response’s header list.
+            //
+            // Otherwise, if headerNames is non-null or failure, then set response’s CORS-exposed header-name list to headerNames.
+            //
+            // One of the headerNames can still be `*` at this point, but will only match a header whose name is `*`.
+        }
+        let filter_type = match request.response_tainting {
+            ResponseTaintingMode::CORS => ResponseType::Cors,
+            ResponseTaintingMode::Basic => ResponseType::Basic,
+            ResponseTaintingMode::Opaque => ResponseType::Opaque,
+        };
+        response = response.to_filtered(filter_type);
+    }
     // Let internalResponse be response, if response is a network error; otherwise response’s internal response.
     //
     // If internalResponse’s URL list is empty, then set it to a clone of request’s URL list.
