@@ -131,7 +131,7 @@ impl Response {
 
     pub fn actual_response_mut(&mut self) -> &mut Response {
         if self.internal_response.is_some() {
-            &mut **self.internal_response.as_mut().unwrap()
+            self.internal_response.as_mut().unwrap()
         } else {
             self
         }
@@ -168,10 +168,7 @@ impl Response {
     }
 
     pub fn is_network_error(&self) -> bool {
-        match self.response_type {
-            ResponseType::Error => true,
-            _ => false,
-        }
+        matches!(self.response_type, ResponseType::Error)
     }
 
     pub fn to_filtered(self, filter_type: ResponseType) -> Response {
@@ -194,9 +191,11 @@ impl Response {
             ResponseType::Basic => {
                 let header = old_header
                     .iter()
-                    .filter(|(name, _)| match &*name.as_str().to_ascii_lowercase() {
-                        "set-cookie" | "set-cookie2" => false,
-                        _ => true,
+                    .filter(|(name, _)| {
+                        !matches!(
+                            &*name.as_str().to_ascii_lowercase(),
+                            "set-cookie" | "set-cookie2"
+                        )
                     })
                     .map(|(n, v)| (n.clone(), v.clone()))
                     .collect();

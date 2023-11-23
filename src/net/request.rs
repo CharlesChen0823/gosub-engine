@@ -331,14 +331,12 @@ impl Request {
 }
 
 pub fn is_cors_safelisted_method(m: &Method) -> bool {
-    match *m {
-        Method::GET | Method::HEAD | Method::POST => true,
-        _ => false,
-    }
+    matches!(*m, Method::GET | Method::HEAD | Method::POST)
 }
 
 pub fn is_cors_unsafe_request_header_byte(value: &[u8]) -> bool {
-    !(value.iter().any(|c| match c {
+    !(value.iter().any(|c| {
+        matches!(c,  
         0x00..=0x08
         | 0x10..=0x19
         | 0x22
@@ -354,8 +352,7 @@ pub fn is_cors_unsafe_request_header_byte(value: &[u8]) -> bool {
         | 0x5D
         | 0x7B
         | 0x7D
-        | 0x7F => true,
-        _ => false,
+        | 0x7F)
     }))
 }
 
@@ -369,20 +366,21 @@ pub fn is_cors_safelisted_request_header<N: AsRef<str>, V: AsRef<[u8]>>(
         return false;
     }
     match name {
-        "accept" => return is_cors_unsafe_request_header_byte(value),
+        "accept" => is_cors_unsafe_request_header_byte(value),
         "accept-language" | "content-language" => {
-            return value.iter().all(|c| match c {
-                0x30..=0x39
-                | 0x41..=0x5A
-                | 0x61..=0x7A
-                | 0x20
-                | 0x2A
-                | 0x2C
-                | 0x2D
-                | 0x2E
-                | 0x3B
-                | 0x3E => true,
-                _ => false,
+            return value.iter().all(|c| {
+                matches!(c,
+                    0x30..=0x39
+                    | 0x41..=0x5A
+                    | 0x61..=0x7A
+                    | 0x20
+                    | 0x2A
+                    | 0x2C
+                    | 0x2D
+                    | 0x2E
+                    | 0x3B
+                    | 0x3E
+                )
             })
         }
         "content-type" => {
@@ -396,17 +394,17 @@ pub fn is_cors_safelisted_request_header<N: AsRef<str>, V: AsRef<[u8]>>(
             };
             let value_mine_result: Result<Mime, _> = value_string.parse();
             match value_mine_result {
-                Err(_) => return false,
-                Ok(value_mime) => match (value_mime.type_(), value_mime.subtype()) {
+                Err(_) => false,
+                Ok(value_mime) => matches!(
+                    (value_mime.type_(), value_mime.subtype()),
                     (mime::APPLICATION, mime::WWW_FORM_URLENCODED)
-                    | (mime::MULTIPART, mime::FORM_DATA)
-                    | (mime::TEXT, mime::PLAIN) => return true,
-                    _ => return false,
-                },
+                        | (mime::MULTIPART, mime::FORM_DATA)
+                        | (mime::TEXT, mime::PLAIN)
+                ),
             }
         }
-        "range" => return true,
-        _ => return false,
+        "range" => true,
+        _ => false,
     }
 }
 
@@ -416,7 +414,7 @@ pub fn convert_header_names_to_sorted_lowercase_set(
     let mut header_set = header_name.to_vec();
     header_set.sort_by(|a, b| a.as_str().partial_cmp(b.as_str()).unwrap());
     header_set.dedup();
-    return header_set.into_iter().cloned().collect();
+    header_set.into_iter().cloned().collect()
 }
 
 pub fn get_cors_unsafe_request_header_names(header: &HeaderMap) -> Vec<HeaderName> {
@@ -434,5 +432,5 @@ pub fn get_cors_unsafe_request_header_names(header: &HeaderMap) -> Vec<HeaderNam
     if safelist_value_size > 1024 {
         unsafe_names.extend_from_slice(&potentially_unsafe_names);
     }
-    return convert_header_names_to_sorted_lowercase_set(unsafe_names);
+    convert_header_names_to_sorted_lowercase_set(unsafe_names)
 }
