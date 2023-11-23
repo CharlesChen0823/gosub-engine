@@ -113,6 +113,14 @@ impl Response {
         }
     }
 
+    pub fn to_actual(self) -> Response {
+        if self.internal_response.is_some() {
+            *self.internal_response.unwrap()
+        } else {
+            self
+        }
+    }
+
     pub fn actual_response(self) -> Response {
         if self.internal_response.is_some() {
             *self.internal_response.unwrap()
@@ -171,7 +179,62 @@ impl Response {
             ResponseType::Default | ResponseType::Error => panic!("unreachable"),
             _ => (),
         }
-        Response::new(self.url.unwrap())
+        let old_response = self.to_actual();
+        if let ResponseType::Error = old_response.response_type {
+            return Response::network_error();
+        }
+        let old_header = old_response.header.clone();
+        let expose_headers = old_response.cors_exposed_header_name_list.clone();
+        let mut response = old_response.clone();
+        response.internal_response = Some(Box::new(old_response));
+        response.response_type = filter_type;
+
+        match response.response_type {
+            ResponseType::Default | ResponseType::Error => unreachable!(),
+            ResponseType::Basic => {
+                let header = old_header
+                    .iter()
+                    .filter(|(name, _)| match &*name.as_str().to_ascii_lowercase() {
+                        "set-cookie" | "set-cookie2" => false,
+                        _ => true,
+                    })
+                    .map(|(n, v)| (n.clone(), v.clone()))
+                    .collect();
+                response.header = header;
+            }
+            ResponseType::Cors => {
+                let header = old_header
+                    .iter()
+                    .filter(|(name, _)| match &*name.as_str().to_ascii_lowercase() {
+                        "cache-control" | "content-language" | "content-length"
+                        | "content-type" | "expires" | "last-modified" | "pragma" => true,
+                        "set-cookie" | "set-cookie2" => false,
+                        head => expose_headers
+                            .iter()
+                            .any(|h| *head == h.as_str().to_ascii_lowercase()),
+                    })
+                    .map(|(n, v)| (n.clone(), v.clone()))
+                    .collect();
+                response.header = header;
+            }
+            ResponseType::Opaque => {
+                response.url_list.clear();
+                response.url = None;
+                response.header.clear();
+                response.status = None;
+                response.status_message.clear();
+                response.body = ResponseBody::None;
+                response.body_info = Arc::new(Mutex::new(ResponseBodyInfo::new()));
+            }
+            ResponseType::OpaqueRedirect => {
+                response.header.clear();
+                response.status = None;
+                response.status_message.clear();
+                response.body = ResponseBody::None;
+                response.body_info = Arc::new(Mutex::new(ResponseBodyInfo::new()));
+            }
+        }
+        response
     }
 }
 
