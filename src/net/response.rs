@@ -1,10 +1,12 @@
+use std::sync::{atomic::AtomicBool, Arc, Mutex};
+
 use headers::HeaderMapExt;
 use http::status::StatusCode;
 use http::HeaderMap;
 use serde::{Deserialize, Serialize};
 use url::Url;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum ResponseType {
     Basic,
     Cors,
@@ -15,10 +17,14 @@ pub enum ResponseType {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ResponseBody {}
+pub enum ResponseBody {
+    None,
+    Receiving(Vec<u8>),
+    Done(Vec<u8>),
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum CacheState {
+pub enum ResponeCacheState {
     None,
     Local,
     Validated,
@@ -49,6 +55,7 @@ pub struct ServiceWorkerTimingInfo {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ResponseInit {
+    pub url: Url,
     #[serde(
         deserialize_with = "hyper_serde::deserialize",
         serialize_with = "hyper_serde::serialize"
@@ -65,19 +72,19 @@ pub struct ResponseInit {
 #[derive(Debug, Clone)]
 pub struct Response {
     pub response_type: ResponseType,
-    pub aborted: bool,
+    pub aborted: Arc<AtomicBool>,
     pub url: Option<Url>,
     pub url_list: Vec<Url>,
     pub status: Option<StatusCode>,
     pub status_message: String,
     pub header: HeaderMap,
-    pub body: Option<ResponseBody>,
-    pub cache_state: CacheState,
-    pub cors_exposed_header: Vec<String>,
+    pub body: ResponseBody,
+    pub cache_state: ResponeCacheState,
+    pub cors_exposed_header_name_list: Vec<String>,
     pub range_requested: bool,
     pub request_includes_credentials: bool,
     pub timing_allow_passed: bool,
-    pub body_info: ResponseBodyInfo,
+    pub body_info: Arc<Mutex<ResponseBodyInfo>>,
     pub worker_timing_info: Option<ServiceWorkerTimingInfo>,
     pub internal_response: Option<Box<Response>>,
     pub has_cross_origin_redirects: bool,
@@ -87,19 +94,19 @@ impl Response {
     pub fn new(url: Url) -> Response {
         Self {
             response_type: ResponseType::Default,
-            aborted: false,
+            aborted: Arc::new(AtomicBool::new(false)),
             url: Some(url),
             url_list: vec![],
             status: Some(StatusCode::OK),
             status_message: String::new(),
             header: HeaderMap::new(),
-            body: None,
-            cache_state: CacheState::None,
-            cors_exposed_header: vec![],
+            body: ResponseBody::None,
+            cache_state: ResponeCacheState::None,
+            cors_exposed_header_name_list: vec![],
             range_requested: false,
             request_includes_credentials: true,
             timing_allow_passed: false,
-            body_info: ResponseBodyInfo::new(),
+            body_info: Arc::new(Mutex::new(ResponseBodyInfo::new())),
             worker_timing_info: None,
             internal_response: None,
             has_cross_origin_redirects: false,
@@ -114,26 +121,42 @@ impl Response {
         }
     }
 
+    pub fn actual_response_mut(&mut self) -> &mut Response {
+        if self.internal_response.is_some() {
+            &mut **self.internal_response.as_mut().unwrap()
+        } else {
+            self
+        }
+    }
+
     pub fn network_error() -> Response {
         Self {
             response_type: ResponseType::Error,
-            aborted: false,
+            aborted: Arc::new(AtomicBool::new(false)),
             url: None,
             url_list: vec![],
             status: None,
             status_message: String::new(),
             header: HeaderMap::new(),
-            body: None,
-            cache_state: CacheState::None,
-            cors_exposed_header: vec![],
+            body: ResponseBody::None,
+            cache_state: ResponeCacheState::None,
+            cors_exposed_header_name_list: vec![],
             range_requested: false,
             request_includes_credentials: true,
             timing_allow_passed: false,
-            body_info: ResponseBodyInfo::new(),
+            body_info: Arc::new(Mutex::new(ResponseBodyInfo::new())),
             worker_timing_info: None,
             internal_response: None,
             has_cross_origin_redirects: false,
         }
+    }
+
+    pub fn from_init(init: ResponseInit) -> Response {
+        let mut rsp = Response::new(init.url);
+        rsp.header = init.header.clone();
+        rsp.status = Some(init.status);
+        rsp.status_message = init.status_message.clone();
+        rsp
     }
 
     pub fn is_network_error(&self) -> bool {

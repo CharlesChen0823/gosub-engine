@@ -1,5 +1,8 @@
+use std::str::FromStr;
+
 use headers::{AccessControlExposeHeaders, HeaderMapExt};
 use http::header::{HeaderMap, HeaderName};
+use http::StatusCode;
 
 use crate::net::request::{
     get_cors_unsafe_request_header_names, is_cors_safelisted_method, CredentialsMode, Mode,
@@ -219,14 +222,14 @@ pub async fn main_fetch(
                     if request.credentials_mode != CredentialsMode::Include
                         && list.iter().any(|header| header == "*") =>
                 {
-                    response.cors_exposed_header = response
+                    response.cors_exposed_header_name_list = response
                         .header
                         .iter()
                         .map(|(name, _)| name.as_str().to_owned())
                         .collect();
                 }
                 Some(list) => {
-                    response.cors_exposed_header =
+                    response.cors_exposed_header_name_list =
                         list.iter().map(|h| h.as_str().to_owned()).collect();
                 }
                 _ => (),
@@ -266,7 +269,7 @@ pub async fn main_fetch(
         internal_response.timing_allow_passed = true;
     }
     //
-    // If response’s type is "opaque", internalResponse’s status is 206, internalResponse’s range-requested flag is set, and request’s header list does not contain `Range`, then set response and internalResponse to a network error.
+    // 19. If response’s type is "opaque", internalResponse’s status is 206, internalResponse’s range-requested flag is set, and request’s header list does not contain `Range`, then set response and internalResponse to a network error.
     //
     // Traditionally, APIs accept a ranged response even if a range was not requested. This prevents a partial response from an earlier ranged request being provided to an API that did not make a range request.
     //
